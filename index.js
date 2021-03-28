@@ -9,6 +9,9 @@ const multiparty = require('multiparty');
 const { fork } = require('child_process');
 const path = require('path');
 
+// 50 MB max
+const MAX_SIZE = 50 * 1024 * 1024;
+
 const getHash = (input) => {
     return crypto.createHash('md5').update(input).digest('hex');
 };
@@ -25,6 +28,30 @@ const getReqBody = (req, cb) => {
         cb && cb(_body);
     });
 };
+
+const createRecord = (developerId, assetId, size, metadata) => new Promise((resolve, reject) => {
+    const client = new aws.DynamoDB({region: 'us-west-2'});
+    const params = {
+        TableName: 'homegames_assets',
+        Item: {
+            'developer_id': {S: developerId},
+            'asset_id': {S: assetId},
+            'created_at': {N: '' + Date.now()},
+            'metadata': {S: JSON.stringify(metadata)},
+            'status': {S: 'created'},
+            'size': {N: '' + size}
+        }
+    };
+
+    client.putItem(params, (err, putResult) => {
+        if (!err) {
+            resolve();
+        } else {
+            reject(err);
+        }
+    });
+
+});
 
 const server = http.createServer((req, res) => {
     if (req.method === 'GET') {
@@ -73,38 +100,56 @@ const server = http.createServer((req, res) => {
                 form.parse(req, (err, fields, files) => {
                     const fileValues = Object.values(files);
 
+
+                    let hack = false;
+
                     const uploadedFiles = fileValues[0].map(f => {
-                        console.log('uufuff');
-                        console.log(f);
 
-                        const assetId = getHash(uuidv4());
-                        const childSession = fork(path.join(__dirname, 'upload.js'), 
-                            [`--path=${f.path}`, `--id=${assetId}`, `--name=${f.originalFilename}`, `size=${f.size}`, `type=${f.headers['content-type']}`]
-                        );
+                        if (hack) {
+                            return;
+                        }
 
-                        return {
-                            path: f.path,
-                            size: f.size,
-                            name: f.originalFilename,
-                            contentType: f.headers['content-type']
+                        hack = true;
+
+                        if (f.size > MAX_SIZE) {
+                            res.writeHead(400);
+                            res.end('File size exceeds ' + MAX_SIZE + ' bytes');
+                        } else {
+                            const assetId = getHash(uuidv4());
+
+                            createRecord('joseph', assetId, f.size, {
+                                'Content-Type': f.headers['content-type']
+                            }).then(() => {
+
+                                const childSession = fork(path.join(__dirname, 'upload.js'), 
+                                    [
+                                        `--path=${f.path}`, 
+                                        `--developer=joseph`, 
+                                        `--id=${assetId}`, 
+                                        `--name=${f.originalFilename}`, 
+                                        `size=${f.size}`, 
+                                        `type=${f.headers['content-type']}`
+                                    ]
+                                );
+                                res.writeHead(200, {'Content-Type': 'application/json'});
+                                res.end(JSON.stringify({
+                                    assetId
+                                }))
+
+                                return {
+                                    path: f.path,
+                                    size: f.size,
+                                    name: f.originalFilename,
+                                    contentType: f.headers['content-type']
+                                }
+                            });
                         }
                     });
 
                     //todo: make this a separate thing
-                    console.log('dfgdfg');
-
-                    console.log(uploadedFiles);
-    
-                    res.writeHead(200, {'Content-Type': 'application/json'});
-                    res.end(JSON.stringify(uploadedFiles))
+//                    res.writeHead(200, {'Content-Type': 'application/json'});
+//                    res.end(JSON.stringify(uploadedFiles))
                 });
-//                let thing = _body.toString();
-//                thing = thing.split('&');
-//                for (let i = 0; i < thing.length; i++) {
-//                    const _d = thing[i].split("=");
-//                    tings[_d[0]] = thing[1];
-//                }
-//                console.log(tings);
                 // 50 MB limit. todo: know if we already ended the req because of limit
 //                cfcff();
 //                const magic = new Magic();
