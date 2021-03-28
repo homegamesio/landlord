@@ -2,6 +2,12 @@ const http = require('http');
 const aws = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
+const Magic = require('mmmagic').Magic;
+const util = require('util');
+const { parse } = require('querystring');
+const multiparty = require('multiparty');
+const { fork } = require('child_process');
+const path = require('path');
 
 const getHash = (input) => {
     return crypto.createHash('md5').update(input).digest('hex');
@@ -52,7 +58,68 @@ const server = http.createServer((req, res) => {
             res.end('ok');
         }
     } else if (req.method === 'POST') {
-        if (req.url === '/games') {
+        if (req.url === '/asset') {
+            const maxSize = 1024 * 50;
+//            let _body = '';
+//            req.on('data', chunk => {
+//                _body += chunk.toString();
+//                if (_body.length > maxSize) {
+//                    res.end('2 big');
+//                } 
+//            });
+//
+//            req.on('end', () => {
+                const form = new multiparty.Form();
+                form.parse(req, (err, fields, files) => {
+                    const fileValues = Object.values(files);
+
+                    const uploadedFiles = fileValues[0].map(f => {
+                        console.log('uufuff');
+                        console.log(f);
+
+                        const assetId = getHash(uuidv4());
+                        const childSession = fork(path.join(__dirname, 'upload.js'), 
+                            [`--path=${f.path}`, `--id=${assetId}`, `--name=${f.originalFilename}`, `size=${f.size}`, `type=${f.headers['content-type']}`]
+                        );
+
+                        return {
+                            path: f.path,
+                            size: f.size,
+                            name: f.originalFilename,
+                            contentType: f.headers['content-type']
+                        }
+                    });
+
+                    //todo: make this a separate thing
+                    console.log('dfgdfg');
+
+                    console.log(uploadedFiles);
+    
+                    res.writeHead(200, {'Content-Type': 'application/json'});
+                    res.end(JSON.stringify(uploadedFiles))
+                });
+//                let thing = _body.toString();
+//                thing = thing.split('&');
+//                for (let i = 0; i < thing.length; i++) {
+//                    const _d = thing[i].split("=");
+//                    tings[_d[0]] = thing[1];
+//                }
+//                console.log(tings);
+                // 50 MB limit. todo: know if we already ended the req because of limit
+//                cfcff();
+//                const magic = new Magic();
+//                console.log(parse(_body))
+//                const fs = require('fs');
+//                fs.writeFileSync("/Users/josephgarcia/datting.jpg", _body);
+//                magic.detect(Buffer.from(_body, 'utf-8'), (err, result) => {
+//
+//                    console.log(err);
+//                    console.log(result);
+//                    res.end('nice bruv');
+//                });
+//            });
+
+        } else if (req.url === '/games') {
             getReqBody(req, (_data) => {
                 const data = JSON.parse(_data);
 
