@@ -1,5 +1,6 @@
 const http = require('http');
 const unzipper = require('unzipper');
+const archiver = require('archiver');
 const fs = require('fs');
 const https = require('https');
 const aws = require('aws-sdk');
@@ -20,14 +21,28 @@ const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reje
     const file = fs.createWriteStream(dir + '.zip');
     const zlib = require('zlib');
     const thing = `https://codeload.github.com/${owner}/${repo}/zip${commitString}`;
+    const archive = archiver('zip');
+    const output = fs.createWriteStream(dir + 'out.zip');
+
     https.get(thing, (_response) => {
-	    const stream = _response.pipe(unzipper.Extract({ path: dir }));
-            stream.on('finish', () => {
-                fs.readdir(dir, (err, files) => {
-	            resolve(dir + '/' + files[0]);
+        output.on('close', () => {
+            fs.readdir(dir, (err, files) => {
+                resolve({
+                    path: dir + '/' + files[0],
+                    zipPath: dir + 'out.zip'
                 });
-            });
+	    });
+        });
+	
+        const stream = _response.pipe(unzipper.Extract({ path: dir }));
+
+        stream.on('finish', () => {
+            archive.directory(dir, false);
+            archive.finalize();
 	});
+
+        archive.pipe(output);
+    });
 });
 
 const getCommit = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
@@ -168,10 +183,10 @@ const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) =
     getCommit(owner, repo, commit).then(_res => {
 
         getBuild(owner, repo, commit).then((dir) => {
-            const cmd = ['--prefix', dir, 'install'];
+            const cmd = ['--prefix', dir.path, 'install'];
             const { exec } = require('child_process');
-            exec('npm --prefix ' + dir + ' install', (err, stdout, stderr) => {
-                const _game = require(dir);
+            exec('npm --prefix ' + dir.path + ' install', (err, stdout, stderr) => {
+                const _game = require(dir.path);
                 resolve(_game);
             });
             // todo: this
@@ -227,15 +242,96 @@ const server = http.createServer((req, res) => {
             getReqBody(req, (_data) => {
                 const data = JSON.parse(_data);
                 console.log('want to publish game');
+                const client = new aws.DynamoDB({region: 'us-west-2'});
+                const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+
                 const _gamePublishRegex = new RegExp('/games/(\\S*)/publish');
                 const gameId = _gamePublishRegex.exec(req.url)[1];
-                getGameInstance(data.owner, data.repo, data.commit).then(game => {
-                    testGame(game).then(() => {
-                        console.log('emailing ' + data.owner);
-                        emailOwner(data.owner)
-                    }).then(() => {
-                        res.end('emailed owner!');
-                    });
+                const params = {
+                    TableName: 'hg_game_versions',
+                    KeyConditionExpression: '#gameId = :gameId',
+                    Limit: 1,
+                    ScanIndexForward: false,
+                    ExpressionAttributeNames: {
+                        '#gameId': 'game_id'
+                    },
+                    ExpressionAttributeValues: {
+                        ':gameId': gameId
+                    }
+                };
+
+                readClient.query(params, (err, result) => {
+                    if (err) {
+                        res.end(err);
+                    } else {
+
+                        let busted = false;
+                        let newVersion = '1';
+
+                        if (result.Items.length) {
+                            console.log(result);
+                            if (result.Items[0].commit == data.commit) {
+                                res.end('already built ' + data.commit);
+                                busted = true;
+                            } else {
+                                newVersion = '' + (result.Items[0].version + 1);
+                            }
+                        } 
+
+                        // hack
+                        if (!busted) {
+
+                            getBuild(data.owner, data.repo, data.commit).then((dir) => {
+                                
+                                const s3 = new aws.S3({region: 'us-west-2'});
+                                fs.readFile(dir.zipPath, (err, buf) => {
+                                    console.log(err);
+
+                                    const params = {
+                                        Body: buf,
+                                        ACL: 'public-read',
+                                        Bucket: 'hg-games',
+                                        Key: `${gameId}/${data.commit}.zip`
+                                    };
+
+                                    s3.putObject(params, (err, s3Data) => {
+                                        console.log('data');
+                                        console.log(s3Data);
+
+                                        const _location = `https://hg-games.s3-us-west-2.amazonaws.com/${gameId}/${data.commit}.zip`;
+
+                                        const params = {
+                                            TableName: 'hg_game_versions',
+                                            Item: {
+                                                'game_id': {S: gameId},
+                                                'version': {N: newVersion},
+                                                'created_at': {N: '' + Date.now()},
+                                                'submitted_by': {S: 'todo'},
+                                                'location': {S: _location},
+                                                'commit': {S: data.commit},
+                                                'status': 'created'
+                                            }
+                                        };
+
+                                        client.putItem(params, (err, putResult) => {
+                                            getGameInstance(data.owner, data.repo, data.commit).then(game => {
+                                                testGame(game).then(() => {
+                                                    console.log('emailing ' + data.owner);
+                                                    emailOwner(data.owner).then(() => {
+                                                        res.end('emailed owner!');
+                                                    }).catch(err => {
+                                                        console.error(err);
+                                                        res.end('error');
+                                                    });
+                                                });
+                                            });
+                                        }); 
+                                    });
+
+                                });
+                            });
+                        }
+                    }
                 });
             });
         } else if (req.url === '/asset') {
