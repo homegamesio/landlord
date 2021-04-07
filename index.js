@@ -14,7 +14,7 @@ const path = require('path');
 
 const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
     // todo: uuid
-    const dir = `/home/ubuntu/tmp/${Date.now()}`;
+    const dir = `/tmp/${Date.now()}`;
 
     const commitString = commit ? '/' + commit : '';
     const file = fs.createWriteStream(dir + '.zip');
