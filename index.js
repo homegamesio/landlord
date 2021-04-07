@@ -1,4 +1,7 @@
 const http = require('http');
+const unzipper = require('unzipper');
+const fs = require('fs');
+const https = require('https');
 const aws = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
@@ -8,6 +11,48 @@ const { parse } = require('querystring');
 const multiparty = require('multiparty');
 const { fork } = require('child_process');
 const path = require('path');
+
+const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
+    // todo: uuid
+    const dir = `/home/ubuntu/tmp/${Date.now()}`;
+
+    const commitString = commit ? '/' + commit : '';
+    const file = fs.createWriteStream(dir + '.zip');
+    const zlib = require('zlib');
+    const thing = `https://codeload.github.com/${owner}/${repo}/zip${commitString}`;
+    https.get(thing, (_response) => {
+	    const stream = _response.pipe(unzipper.Extract({ path: dir }));
+            stream.on('finish', () => {
+                fs.readdir(dir, (err, files) => {
+	            resolve(dir + '/' + files[0]);
+                });
+            });
+	});
+});
+
+const getCommit = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
+    const _headers = {
+        'User-Agent': 'HomegamesLandlord/0.1.0'
+    };
+
+    https.get({
+        hostname: 'api.github.com',
+        path: `/repos/${owner}/${repo}${commit ? '/' + commit : ''}`,
+        headers: _headers
+    }, res => {
+        
+        let _buf = '';
+
+        res.on('end', () => {
+            resolve(_buf);
+        });
+
+        res.on('data', (_data) => {
+            _buf += _data;
+        }); 
+
+    });
+});
 
 // 50 MB max
 const MAX_SIZE = 50 * 1024 * 1024;
@@ -53,6 +98,91 @@ const createRecord = (developerId, assetId, size, metadata) => new Promise((reso
 
 });
 
+const getOwnerEmail = (owner) => new Promise((resolve, reject) => {
+     const _headers = {
+        'User-Agent': 'HomegamesLandlord/0.1.0',
+        'Authorization': 'Basic ' + Buffer.from('prosif' + ':' + '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').toString('base64')
+    };
+
+    https.get({
+        hostname: 'api.github.com',
+        path: `/users/${owner}`,
+        headers: _headers
+    }, res => {
+        
+        let _buf = '';
+
+        res.on('end', () => {
+            const data = JSON.parse(_buf);
+            resolve(data.email);
+        });
+
+        res.on('data', (_data) => {
+            _buf += _data;
+        }); 
+
+    });
+});
+
+const emailOwner = (owner) => new Promise((resolve, reject) => {
+    getOwnerEmail(owner).then(_email => {
+        const ses = new aws.SES({region: 'us-west-2'});
+        const params = {
+            Destination: {
+                ToAddresses: [
+                    _email
+                ]
+            },
+            Message: {
+                Body: {
+                    Html: {
+                        Charset: 'UTF-8',
+                        Data: '<html><body>hello world</body></html>'
+                    }   
+                },
+                Subject: {
+                    Charset: 'UTF-8',
+                    Data: 'Testing'
+                }
+            },
+            Source: 'landlord@homegames.io'
+        };
+        ses.sendEmail(params, (err, data) => {
+            err ? reject(err) : resolve(data);
+        });
+    });
+});
+
+const testGame = (game) => new Promise((resolve, reject) => {
+    const instance = new game();
+    // todo: make this good
+    if (instance.getRoot()) {
+        resolve();
+    } else {
+        reject();
+    }
+});
+
+const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) => {
+
+    getCommit(owner, repo, commit).then(_res => {
+
+        getBuild(owner, repo, commit).then((dir) => {
+            const sourceNodeModules = 'INSERTHERE';
+            fs.symlink(sourceNodeModules, dir + '/node_modules', 'dir', (err) => {
+                if (!err) {
+                    const _game = require(dir);
+                    resolve(_game);
+                } else {
+                    reject(err);
+                }
+            });
+        });
+    
+    });
+
+});
+
 const server = http.createServer((req, res) => {
     if (req.method === 'GET') {
         if (req.url === '/games') {
@@ -85,7 +215,23 @@ const server = http.createServer((req, res) => {
             res.end('ok');
         }
     } else if (req.method === 'POST') {
-        if (req.url === '/asset') {
+        const gamePublishRegex = new RegExp('/games/(\\S*)/publish');
+        if (req.url.match(gamePublishRegex)) {
+            getReqBody(req, (_data) => {
+                const data = JSON.parse(_data);
+                console.log(data);
+                console.log('want to publish game');
+                const _gamePublishRegex = new RegExp('/games/(\\S*)/publish');
+                const gameId = _gamePublishRegex.exec(req.url)[1];
+                getGameInstance(data.owner, data.repo, data.commit).then(game => {
+                    testGame(game).then(() => {
+                        emailOwner(data.owner)
+                    }).then(() => {
+                        res.end('emailed owner!');
+                    });
+                });
+            });
+        } else if (req.url === '/asset') {
             const maxSize = 1024 * 50;
 //            let _body = '';
 //            req.on('data', chunk => {
@@ -167,6 +313,18 @@ const server = http.createServer((req, res) => {
         } else if (req.url === '/games') {
             getReqBody(req, (_data) => {
                 const data = JSON.parse(_data);
+
+                console.log('got data');
+                //https://api.github.com/repos/prosif/do-dad/git/commits/cd1b383cfe22a0bfcea13a05115bf9e735b3f5b1
+                console.log(_data);
+//                const commitString = data.github.commit ? '/' + data.github.commit : '';
+                //const codeUrl = `https://api.github.com/repos/${data.github.owner}/${data.github.repo}/git/commits/${commitString}`
+                //console.log(codeUrl);
+                //getCommit(data.github.owner, data.github.repo, data.github.commit).then(_res => {
+                //    getBuild(data.github.owner, data.github.repo, data.github.commit).then(() => {
+                //        console.log('got code!!!!!');
+                //    });
+                //});
 
                 const client = new aws.DynamoDB({region: 'us-west-2'});
                 const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
