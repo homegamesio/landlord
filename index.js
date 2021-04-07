@@ -309,11 +309,13 @@ const server = http.createServer((req, res) => {
                                                 'submitted_by': {S: 'todo'},
                                                 'location': {S: _location},
                                                 'commit': {S: data.commit},
-                                                'status': 'created'
+                                                'status': {S: 'created'}
                                             }
                                         };
 
                                         client.putItem(params, (err, putResult) => {
+                                            console.log(err);
+                                            console.log(putResult);
                                             getGameInstance(data.owner, data.repo, data.commit).then(game => {
                                                 testGame(game).then(() => {
                                                     console.log('emailing ' + data.owner);
