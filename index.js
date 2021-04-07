@@ -168,15 +168,22 @@ const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) =
     getCommit(owner, repo, commit).then(_res => {
 
         getBuild(owner, repo, commit).then((dir) => {
-            const sourceNodeModules = 'INSERTHERE';
-            fs.symlink(sourceNodeModules, dir + '/node_modules', 'dir', (err) => {
-                if (!err) {
-                    const _game = require(dir);
-                    resolve(_game);
-                } else {
-                    reject(err);
-                }
+            const cmd = ['--prefix', dir, 'install'];
+            const { exec } = require('child_process');
+            exec('npm --prefix ' + dir + ' install', (err, stdout, stderr) => {
+                const _game = require(dir);
+                resolve(_game);
             });
+            // todo: this
+            //const sourceNodeModules = 'INSERTHERE';
+//            fs.symlink(sourceNodeModules, dir + '/node_modules', 'dir', (err) => {
+//                if (!err) {
+//                    const _game = require(dir);
+//                    resolve(_game);
+//                } else {
+//                    reject(err);
+//                }
+//            });
         });
     
     });
@@ -219,12 +226,12 @@ const server = http.createServer((req, res) => {
         if (req.url.match(gamePublishRegex)) {
             getReqBody(req, (_data) => {
                 const data = JSON.parse(_data);
-                console.log(data);
                 console.log('want to publish game');
                 const _gamePublishRegex = new RegExp('/games/(\\S*)/publish');
                 const gameId = _gamePublishRegex.exec(req.url)[1];
                 getGameInstance(data.owner, data.repo, data.commit).then(game => {
                     testGame(game).then(() => {
+                        console.log('emailing ' + data.owner);
                         emailOwner(data.owner)
                     }).then(() => {
                         res.end('emailed owner!');
