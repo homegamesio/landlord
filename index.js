@@ -101,7 +101,7 @@ const createRecord = (developerId, assetId, size, metadata) => new Promise((reso
 const getOwnerEmail = (owner) => new Promise((resolve, reject) => {
      const _headers = {
         'User-Agent': 'HomegamesLandlord/0.1.0',
-        'Authorization': 'Basic ' + Buffer.from('prosif' + ':' + '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').toString('base64')
+        'Authorization': 'Basic ' + Buffer.from('prosif' + ':' + 'whoops').toString('base64')
     };
 
     https.get({
