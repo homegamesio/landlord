@@ -1,5 +1,6 @@
 const http = require('http');
 const unzipper = require('unzipper');
+const url = require('url');
 const archiver = require('archiver');
 const fs = require('fs');
 const https = require('https');
@@ -139,7 +140,34 @@ const getOwnerEmail = (owner) => new Promise((resolve, reject) => {
     });
 });
 
-const emailOwner = (owner) => new Promise((resolve, reject) => {
+const createCode = (email, gameId, commit, version) => new Promise((resolve, reject) => {
+
+    const code = getHash(uuidv4());
+
+    const client = new aws.DynamoDB({region: 'us-west-2'});
+
+    const params = {
+        TableName: 'hg_requests',
+        Item: {
+            'code': {S: code},
+            'game_id': {S: gameId},
+            'commit': {S: commit },
+            'status': {S: 'created'},
+            'version': {N: version}
+        }
+    };
+
+    client.putItem(params, (err, putResult) => {
+        if (err) {
+            reject();
+        } else {
+            resolve(code);
+        }
+    });
+ 
+});
+
+const emailOwner = (owner, code, commit) => new Promise((resolve, reject) => {
     getOwnerEmail(owner).then(_email => {
         const ses = new aws.SES({region: 'us-west-2'});
         const params = {
@@ -152,7 +180,7 @@ const emailOwner = (owner) => new Promise((resolve, reject) => {
                 Body: {
                     Html: {
                         Charset: 'UTF-8',
-                        Data: '<html><body>hello world</body></html>'
+                        Data: `<html><body><a href="https://landlord.homegames.io/confirm?code=${code}&commit=${commit}">here</a> to confirm this submission</body></html>`
                     }   
                 },
                 Subject: {
@@ -207,32 +235,183 @@ const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) =
 
 const server = http.createServer((req, res) => {
     if (req.method === 'GET') {
-        if (req.url === '/games') {
-            const client = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+        const gameDetailRegex = new RegExp('/games/(\\S*)');
+        if (req.url.startsWith('/confirm')) {
+            const queryObject = url.parse(req.url,true).query;
+
+            const code = queryObject.code;
+            const commit = queryObject.commit;
+
+            const ddb = new aws.DynamoDB({region: 'us-west-2'});
+
             const params = {
-                TableName: 'hg_games',
-                KeyConditionExpression: '#devId = :devId',
+                TableName: 'hg_requests',
+                Key: {
+                    'code': {S: code},
+                    'commit': {S: commit}
+                }
+            };
+
+            ddb.getItem(params, (err, data) => {
+                console.log('got item');
+                console.log(err);
+                console.log(data);
+                if (data) {
+                    const gameId = data.Item.game_id.S;
+                    const version = data.Item.version.N;
+                    console.log('need to approve ' + gameId);
+                    const gameVersion = ddb.getItem({
+                        TableName: 'hg_game_versions',
+                        Key: {
+                            'game_id': {S: gameId},
+                            'version': {N: '' + version}
+                        }
+                    }, (err, data) => {
+                        console.log('got data');
+                        console.log(data);
+                        
+                        const updateParams = {
+                            TableName: 'hg_game_versions',
+                            Key: {
+                                'game_id': {S: gameId},
+                                'version': {N: '' + version}
+                            },
+                            AttributeUpdates: {
+                                'status': {
+                                    Action: 'PUT', 
+                                    Value: {
+                                        S: 'approved' 
+                                    }
+                                },
+                                'approved_at': {
+                                    Action: 'PUT',
+                                    Value: {
+                                        N: '' + Date.now()
+                                    }
+                                }
+                            }
+                        };
+
+                        const reqUpdateParams = {
+                            TableName: 'hg_requests',
+                            Key: {
+                                'code': {S: code},
+                                'commit': {S: commit}
+                            },
+                            AttributeUpdates: {
+                                'status': {
+                                    Action: 'PUT',
+                                    Value: {
+                                        S: 'approved'
+                                    }
+                                },
+                                'approved_at': {
+                                    Action: 'PUT',
+                                    Value: {
+                                        N: '' + Date.now()
+                                    }
+                                }
+                            }
+                        };
+
+                        ddb.updateItem(updateParams, (err, putResult) => {
+                            if (!err) {
+                                ddb.updateItem(reqUpdateParams, (err, putResult2) => {
+                                    if (!err) {
+                                        res.end('nice');
+                                    } else {
+                                        res.end('no');
+                                    }
+                                });
+                            } else {
+                                res.end('no 2');
+                            }
+                        });
+                    });
+                }
+            });
+
+        } else if (req.url.match(gameDetailRegex)) {
+            const gameId = gameDetailRegex.exec(req.url)[1].split('?')[0];
+
+            const client = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+
+            const params = {
+                TableName: 'hg_game_versions',
+                ScanIndexForward: false,
+                KeyConditionExpression: '#game_id = :game_id',
                 ExpressionAttributeNames: {
-                    '#devId': 'developer_id'
+                    '#game_id': 'game_id'
                 },
                 ExpressionAttributeValues: {
-                    ':devId': 'joseph'
+                    ':game_id': gameId
                 }
             };
 
             client.query(params, (err, data) => {
-                if (err) {
-                    res.end(err);
-                } else {
-                    res.writeHead(200, {
-                        'Content-Type': 'application/json'
-                    });
- 
+                const results = data.Items.map(i => {
+                    return {
+                        version: i.version,
+                        created: new Date(i.created_at),
+                        commit: i.commit,
+                        'location': i.location
+                    }
+                });
+
+                res.end(JSON.stringify({ versions: results }));
+            });
+
+        } else if (req.url.startsWith('/games')) {
+            const client = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+            const queryObject = url.parse(req.url,true).query;
+
+            const searchQuery = queryObject.query;
+
+            if (searchQuery) {
+                const queryParams = {
+                    TableName: 'hg_games',
+                    IndexName: 'game_name_index',
+                    KeyConditionExpression: '#game_name = :game_name',
+                    ExpressionAttributeNames: {
+                        '#game_name': 'game_name'
+                    },
+                    ExpressionAttributeValues: {
+                        ':game_name': searchQuery
+                    }
+                }
+
+                client.query(queryParams, (err, data) => {
                     res.end(JSON.stringify({
                         games: data.Items
                     }));
-                }
-            });
+                });
+            } else {
+
+                const params = {
+                    TableName: 'hg_games',
+                    KeyConditionExpression: '#devId = :devId',
+                    ExpressionAttributeNames: {
+                        '#devId': 'developer_id'
+                    },
+                    ExpressionAttributeValues: {
+                        ':devId': 'joseph'
+                    }
+                };
+
+                client.query(params, (err, data) => {
+                    if (err) {
+                        res.end(err);
+                    } else {
+                        res.writeHead(200, {
+                            'Content-Type': 'application/json'
+                        });
+ 
+                        res.end(JSON.stringify({
+                            games: data.Items
+                        }));
+                    }
+                });
+            }
         } else {
             res.end('ok');
         }
@@ -319,11 +498,17 @@ const server = http.createServer((req, res) => {
                                             getGameInstance(data.owner, data.repo, data.commit).then(game => {
                                                 testGame(game).then(() => {
                                                     console.log('emailing ' + data.owner);
-                                                    emailOwner(data.owner).then(() => {
-                                                        res.end('emailed owner!');
-                                                    }).catch(err => {
-                                                        console.error(err);
-                                                        res.end('error');
+                                                    getOwnerEmail(data.owner).then(_email => {
+                                                        console.log(_email);
+                                                        createCode(_email, gameId, data.commit, newVersion).then((code) => {
+                                                            console.log('created code');
+                                                            emailOwner(data.owner, code, data.commit).then(() => {
+                                                                res.end('emailed owner!');
+                                                            }).catch(err => {
+                                                                console.error(err);
+                                                                res.end('error');
+                                                            });
+                                                        });
                                                     });
                                                 });
                                             });
