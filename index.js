@@ -354,6 +354,7 @@ const server = http.createServer((req, res) => {
                         version: i.version,
                         created: new Date(i.created_at),
                         commit: i.commit,
+                        'status': i.status,
                         'location': i.location
                     }
                 });
