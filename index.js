@@ -396,16 +396,18 @@ const server = http.createServer((req, res) => {
 
                 const params = {
                     TableName: 'hg_games',
-                    KeyConditionExpression: '#devId = :devId',
-                    ExpressionAttributeNames: {
-                        '#devId': 'developer_id'
-                    },
-                    ExpressionAttributeValues: {
-                        ':devId': 'joseph'
-                    }
+                    ScanIndexForward: false,
+//                    IndexName: 'game_name_index',
+                    //KeyConditionExpression: '#devId = :devId',
+//                    ExpressionAttributeNames: {
+//                        '#devId': 'developer_id'
+//                    },
+//                    ExpressionAttributeValues: {
+//                        ':devId': 'joseph'
+//                    }
                 };
 
-                client.query(params, (err, data) => {
+                client.scan(params, (err, data) => {
                     if (err) {
                         res.end(err);
                     } else {
