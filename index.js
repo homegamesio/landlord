@@ -358,6 +358,9 @@ const server = http.createServer((req, res) => {
                     }
                 });
 
+                res.writeHead(200, {
+                    'Content-Type': 'application/json'
+                });
                 res.end(JSON.stringify({ versions: results }));
             });
 
@@ -381,6 +384,10 @@ const server = http.createServer((req, res) => {
                 }
 
                 client.query(queryParams, (err, data) => {
+                    res.writeHead(200, {
+                        'Content-Type': 'application/json'
+                    });
+
                     res.end(JSON.stringify({
                         games: data.Items
                     }));
@@ -405,7 +412,10 @@ const server = http.createServer((req, res) => {
                         res.writeHead(200, {
                             'Content-Type': 'application/json'
                         });
- 
+                        res.writeHead(200, {
+                            'Content-Type': 'application/json'
+                        });
+
                         res.end(JSON.stringify({
                             games: data.Items
                         }));
