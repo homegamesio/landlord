@@ -286,8 +286,8 @@ const server = http.createServer((req, res) => {
         if (req.url == '/assets') {
             const username = req.headers['hg-username'];
             const token = req.headers['hg-token'];
-            // todo: auth
-            if (!username) {
+
+            if (!username || !token) {
                 res.end('no');
             } else {
                 verifyAccessToken(username, token).then(() => {
@@ -298,6 +298,9 @@ const server = http.createServer((req, res) => {
  
                         res.end(JSON.stringify({ assets }));
                     });
+                }).catch((err) => {
+                    console.log(err);
+                    res.end('error');
                 });
             }
         } else if (req.url.startsWith('/confirm')) {
@@ -596,88 +599,66 @@ const server = http.createServer((req, res) => {
                 });
             });
         } else if (req.url === '/asset') {
-            const maxSize = 1024 * 50;
-//            let _body = '';
-//            req.on('data', chunk => {
-//                _body += chunk.toString();
-//                if (_body.length > maxSize) {
-//                    res.end('2 big');
-//                } 
-//            });
-//
-//            req.on('end', () => {
-                const form = new multiparty.Form();
-                form.parse(req, (err, fields, files) => {
-                    const fileValues = Object.values(files);
+            const username = req.headers['hg-username'];
+            const token = req.headers['hg-token'];
 
-
-                    let hack = false;
-
-                    const uploadedFiles = fileValues[0].map(f => {
-
-                        if (hack) {
-                            return;
-                        }
-
-                        hack = true;
-
-                        if (f.size > MAX_SIZE) {
-                            res.writeHead(400);
-                            res.end('File size exceeds ' + MAX_SIZE + ' bytes');
-                        } else {
-                            const assetId = getHash(uuidv4());
-
-                            const username = req.headers['hg-username'];
-                            console.log('hello');
-                            console.log(username);
-                            // todo: auth
-                            createRecord(username, assetId, f.size, {
-                                'Content-Type': f.headers['content-type']
-                            }).then(() => {
-
-                                const childSession = fork(path.join(__dirname, 'upload.js'), 
-                                    [
-                                        `--path=${f.path}`, 
-                                        `--developer=${username}`, 
-                                        `--id=${assetId}`, 
-                                        `--name=${f.originalFilename}`, 
-                                        `size=${f.size}`, 
-                                        `type=${f.headers['content-type']}`
-                                    ]
-                                );
-                                res.writeHead(200, {'Content-Type': 'application/json'});
-                                res.end(JSON.stringify({
-                                    assetId
-                                }))
-
-//                                return {
-//                                    path: f.path,
-//                                    size: f.size,
-//                                    name: f.originalFilename,
-//                                    contentType: f.headers['content-type']
-//                                }
-                            });
-                        }
+            if (!username || !token) {
+                res.end('no');
+            } else {
+                verifyAccessToken(username, token).then(() => {
+                    const form = new multiparty.Form();
+                    form.parse(req, (err, fields, files) => {
+                        const fileValues = Object.values(files);
+    
+                        let hack = false;
+    
+                        const uploadedFiles = fileValues[0].map(f => {
+    
+                            if (hack) {
+                                return;
+                            }
+    
+                            hack = true;
+    
+                            if (f.size > MAX_SIZE) {
+                                res.writeHead(400);
+                                res.end('File size exceeds ' + MAX_SIZE + ' bytes');
+                            } else {
+                                const assetId = getHash(uuidv4());
+    
+                                const username = req.headers['hg-username'];
+                                console.log('hello');
+                                console.log(username);
+                                // todo: auth
+                                createRecord(username, assetId, f.size, {
+                                    'Content-Type': f.headers['content-type']
+                                }).then(() => {
+    
+                                    const childSession = fork(path.join(__dirname, 'upload.js'), 
+                                        [
+                                            `--path=${f.path}`, 
+                                            `--developer=${username}`, 
+                                            `--id=${assetId}`, 
+                                            `--name=${f.originalFilename}`, 
+                                            `size=${f.size}`, 
+                                            `type=${f.headers['content-type']}`
+                                        ]
+                                    );
+                                    res.writeHead(200, {'Content-Type': 'application/json'});
+                                    res.end(JSON.stringify({
+                                        assetId
+                                    }))
+    
+                                });
+                            }
+                        });
+    
                     });
-
-                    //todo: make this a separate thing
-//                    res.writeHead(200, {'Content-Type': 'application/json'});
-//                    res.end(JSON.stringify(uploadedFiles))
+                }).catch((err) => {
+                    console.log(err);
+                    res.end('error');
                 });
-                // 50 MB limit. todo: know if we already ended the req because of limit
-//                cfcff();
-//                const magic = new Magic();
-//                console.log(parse(_body))
-//                const fs = require('fs');
-//                fs.writeFileSync("/Users/josephgarcia/datting.jpg", _body);
-//                magic.detect(Buffer.from(_body, 'utf-8'), (err, result) => {
-//
-//                    console.log(err);
-//                    console.log(result);
-//                    res.end('nice bruv');
-//                });
-//            });
-
+            }
         } else if (req.url === '/games') {
             getReqBody(req, (_data) => {
                 const data = JSON.parse(_data);
