@@ -439,13 +439,16 @@ const server = http.createServer((req, res) => {
             if (searchQuery) {
                 const queryParams = {
                     TableName: 'hg_games',
-                    IndexName: 'game_name_index',
-                    KeyConditionExpression: '#game_name = :game_name',
+                    IndexName: 'game_name_sort_index',
+                    ScanIndexForward: true,
+                    KeyConditionExpression: '#dummy = :dummy and begins_with(#game_name, :game_name_query)',
                     ExpressionAttributeNames: {
-                        '#game_name': 'game_name'
+                        '#game_name': 'game_name',
+                        '#dummy': 'dummy'
                     },
                     ExpressionAttributeValues: {
-                        ':game_name': searchQuery
+                        ':game_name_query': searchQuery,
+                        ':dummy': 'dummy'
                     }
                 }
 
@@ -459,30 +462,48 @@ const server = http.createServer((req, res) => {
                     }));
                 });
             } else {
+                const username = req.headers['hg-username'];
+
+                const sort = queryObject.sort || 'name';
+                const order = queryObject.order || 'asc';
+
+                const indexMap = {
+                    'name': 'game_name_sort_index',
+                    'created': 'created_at_sort_index',
+                    'updated': 'updated_at_sort_index'
+                };
 
                 const params = {
                     TableName: 'hg_games',
-                    ScanIndexForward: false,
-//                    IndexName: 'game_name_index',
-                    //KeyConditionExpression: '#devId = :devId',
-//                    ExpressionAttributeNames: {
-//                        '#devId': 'developer_id'
-//                    },
-//                    ExpressionAttributeValues: {
-//                        ':devId': 'joseph'
-//                    }
+                    ScanIndexForward: order === 'asc',
+                    IndexName: indexMap[sort] || indexMap['name'],
+                    KeyConditionExpression: '#dummy = :dummy',
+                    ExpressionAttributeNames: {
+                        '#dummy': 'dummy'
+                    },
+                    ExpressionAttributeValues: {
+                        ':dummy': 'dummy'
+                    }
                 };
 
-                client.scan(params, (err, data) => {
+                client.query(params, (err, data) => {
                     if (err) {
-                        res.end(err);
+                        res.end(err.toString());
                     } else {
                         res.writeHead(200, {
                             'Content-Type': 'application/json'
                         });
 
                         res.end(JSON.stringify({
-                            games: data.Items
+                            games: data.Items.map(g => {
+                                return {
+                                    created: g.created_at,
+                                    updated: g.updated_at,
+                                    id: g.game_id,
+                                    submitted_by: g.developer_id,
+                                    name: g.game_name
+                                }
+                            })
                         }));
                     }
                 });
