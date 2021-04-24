@@ -608,50 +608,54 @@ const server = http.createServer((req, res) => {
                 verifyAccessToken(username, token).then(() => {
                     const form = new multiparty.Form();
                     form.parse(req, (err, fields, files) => {
-                        const fileValues = Object.values(files);
+                        if (!files) {
+                            res.end('no');
+                        } else {
+                            const fileValues = Object.values(files);
     
-                        let hack = false;
+                            let hack = false;
     
-                        const uploadedFiles = fileValues[0].map(f => {
+                            const uploadedFiles = fileValues[0].map(f => {
     
-                            if (hack) {
-                                return;
-                            }
+                                if (hack) {
+                                    return;
+                                }
     
-                            hack = true;
+                                hack = true;
     
-                            if (f.size > MAX_SIZE) {
-                                res.writeHead(400);
-                                res.end('File size exceeds ' + MAX_SIZE + ' bytes');
-                            } else {
-                                const assetId = getHash(uuidv4());
+                                if (f.size > MAX_SIZE) {
+                                    res.writeHead(400);
+                                    res.end('File size exceeds ' + MAX_SIZE + ' bytes');
+                                } else {
+                                    const assetId = getHash(uuidv4());
     
-                                const username = req.headers['hg-username'];
-                                console.log('hello');
-                                console.log(username);
-                                // todo: auth
-                                createRecord(username, assetId, f.size, {
-                                    'Content-Type': f.headers['content-type']
-                                }).then(() => {
+                                    const username = req.headers['hg-username'];
+                                    console.log('hello');
+                                    console.log(username);
+                                    // todo: auth
+                                    createRecord(username, assetId, f.size, {
+                                        'Content-Type': f.headers['content-type']
+                                    }).then(() => {
     
-                                    const childSession = fork(path.join(__dirname, 'upload.js'), 
-                                        [
-                                            `--path=${f.path}`, 
-                                            `--developer=${username}`, 
-                                            `--id=${assetId}`, 
-                                            `--name=${f.originalFilename}`, 
-                                            `size=${f.size}`, 
-                                            `type=${f.headers['content-type']}`
-                                        ]
-                                    );
-                                    res.writeHead(200, {'Content-Type': 'application/json'});
-                                    res.end(JSON.stringify({
-                                        assetId
-                                    }))
+                                        const childSession = fork(path.join(__dirname, 'upload.js'), 
+                                            [
+                                                `--path=${f.path}`, 
+                                                `--developer=${username}`, 
+                                                `--id=${assetId}`, 
+                                                `--name=${f.originalFilename}`, 
+                                                `size=${f.size}`, 
+                                                `type=${f.headers['content-type']}`
+                                            ]
+                                        );
+                                        res.writeHead(200, {'Content-Type': 'application/json'});
+                                        res.end(JSON.stringify({
+                                            assetId
+                                        }))
     
-                                });
-                            }
-                        });
+                                    });
+                                }
+                            });
+                        }
     
                     });
                 }).catch((err) => {
