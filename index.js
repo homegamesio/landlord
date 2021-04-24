@@ -473,18 +473,34 @@ const server = http.createServer((req, res) => {
                     'updated': 'updated_at_sort_index'
                 };
 
-                const params = {
-                    TableName: 'hg_games',
-                    ScanIndexForward: order === 'asc',
-                    IndexName: indexMap[sort] || indexMap['name'],
-                    KeyConditionExpression: '#dummy = :dummy',
-                    ExpressionAttributeNames: {
-                        '#dummy': 'dummy'
-                    },
-                    ExpressionAttributeValues: {
-                        ':dummy': 'dummy'
-                    }
-                };
+                let params = {};
+
+                if (!username) {
+                    params = {
+                        TableName: 'hg_games',
+                        ScanIndexForward: order === 'asc',
+                        IndexName: indexMap[sort] || indexMap['name'],
+                        KeyConditionExpression: '#dummy = :dummy',
+                        ExpressionAttributeNames: {
+                            '#dummy': 'dummy'
+                        },
+                        ExpressionAttributeValues: {
+                            ':dummy': 'dummy'
+                        }
+                    };
+                } else {
+                    params = {
+                        TableName: 'hg_games',
+                        ScanIndexForward: order === 'asc',
+                        KeyConditionExpression: '#devId= :devId',
+                        ExpressionAttributeNames: {
+                            '#devId': 'developer_id'
+                        },
+                        ExpressionAttributeValues: {
+                            ':devId': username
+                        }
+                    };
+                }
 
                 client.query(params, (err, data) => {
                     if (err) {
