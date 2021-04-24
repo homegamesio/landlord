@@ -14,6 +14,8 @@ const getHash = (input) => {
     return crypto.createHash('md5').update(input).digest('hex');
 };
 
+console.log('up');
+
 const upload = (filePath, assetId, fileName, fileSize, fileType) => new Promise((resolve, reject) => {
     console.log('need to upload with ' + assetId);
     const s3 = new aws.S3({region: 'us-west-2'});
@@ -40,36 +42,59 @@ const upload = (filePath, assetId, fileName, fileSize, fileType) => new Promise(
 
 const updateRecord = (developerId, assetId, _status) => new Promise((resolve, reject) => {
     const client = new aws.DynamoDB({region: 'us-west-2'});
-    const params = {
+
+    const queryParams = {
         TableName: 'homegames_assets',
-        Key: {
-            'developer_id': {S: developerId},
-            'asset_id': {S: assetId}
+        IndexName: 'asset_id-index',
+        KeyConditionExpression: '#assetId = :assetId',// and #created <= :now',// and #assetId = :assetId',
+        ExpressionAttributeNames: {
+//            '#devId': 'developer_id',
+            '#assetId': 'asset_id'
+//            '#created': 'created_at'
         },
-        AttributeUpdates: {
-            'status': {
-                Action: 'PUT', 
-                Value: {
-                    S: _status
-                }
-            },
-            'updated_at': {
-                Action: 'PUT',
-                Value: {
-                    N: '' + Date.now()
-                }
+        ExpressionAttributeValues: {
+            ':assetId': {
+                S: assetId
             }
         }
     };
-
-    client.updateItem(params, (err, putResult) => {
-        if (!err) {
-            resolve();
-        } else {
-            reject(err);
+    
+    client.query(queryParams, (err, result) => {
+        console.log('got result');
+        console.log(result);
+        if (result.Items.length == 1) {
+            const createdAt = result.Items[0].created_at.N;
+            const updateParams = {
+                TableName: 'homegames_assets',
+                Key: {
+                    'developer_id': {S: developerId},
+                    'created_at': {N: createdAt}
+                },
+                AttributeUpdates: {
+                    'status': {
+                        Action: 'PUT', 
+                        Value: {
+                            S: _status
+                        }
+                    },
+                    'updated_at': {
+                        Action: 'PUT',
+                        Value: {
+                            N: '' + Date.now()
+                        }
+                    }
+                }
+            };
+        
+            client.updateItem(updateParams, (err, putResult) => {
+                if (!err) {
+                    resolve();
+                } else {
+                    reject(err);
+                }
+            });
         }
     });
-
 });
 
 

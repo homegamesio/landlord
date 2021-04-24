@@ -13,6 +13,7 @@ const { parse } = require('querystring');
 const multiparty = require('multiparty');
 const { fork } = require('child_process');
 const path = require('path');
+const { verifyAccessToken } = require('homegames-common');
 
 const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
     // todo: uuid
@@ -90,8 +91,51 @@ const getReqBody = (req, cb) => {
     });
 };
 
+const listAssets = (developerId) => new Promise((resolve, reject) => {
+    console.log('dddd ' + developerId);
+    const client = new aws.DynamoDB({region: 'us-west-2'});
+
+    const params = {
+        TableName: 'homegames_assets',
+        ScanIndexForward: false,
+        KeyConditionExpression: '#developer_id = :developer_id',
+        ExpressionAttributeNames: {
+            '#developer_id': 'developer_id'
+        },
+        ExpressionAttributeValues: {
+            ':developer_id': {
+                S: developerId
+            }
+        }
+    };
+
+    client.query(params, (err, results) => {
+        if (!err) {
+            console.log('got assets');
+            console.log(results);
+            const res = results.Items.map(i => {
+                return {
+                    'developerId': i.developer_id.S,
+                    'size': Number(i.size.N),
+                    'assetId': i.asset_id.S,
+                    'created': Number(i.created_at.N),
+                    'status': i['status'].S
+                };
+            });
+            resolve(res);
+//            resolve();
+        } else {
+            console.log(err);
+  //          reject(err);
+        }
+    });
+
+});
+
 const createRecord = (developerId, assetId, size, metadata) => new Promise((resolve, reject) => {
     const client = new aws.DynamoDB({region: 'us-west-2'});
+    console.log('creating with');
+    console.log(developerId);
     const params = {
         TableName: 'homegames_assets',
         Item: {
@@ -234,9 +278,29 @@ const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) =
 });
 
 const server = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+
     if (req.method === 'GET') {
         const gameDetailRegex = new RegExp('/games/(\\S*)');
-        if (req.url.startsWith('/confirm')) {
+        if (req.url == '/assets') {
+            const username = req.headers['hg-username'];
+            const token = req.headers['hg-token'];
+            // todo: auth
+            if (!username) {
+                res.end('no');
+            } else {
+                verifyAccessToken(username, token).then(() => {
+                    listAssets(username).then(assets => {
+                        res.writeHead(200, {
+                            'Content-Type': 'application/json'
+                        });
+ 
+                        res.end(JSON.stringify({ assets }));
+                    });
+                });
+            }
+        } else if (req.url.startsWith('/confirm')) {
             const queryObject = url.parse(req.url,true).query;
 
             const code = queryObject.code;
@@ -253,9 +317,6 @@ const server = http.createServer((req, res) => {
             };
 
             ddb.getItem(params, (err, data) => {
-                console.log('got item');
-                console.log(err);
-                console.log(data);
                 if (data) {
                     const gameId = data.Item.game_id.S;
                     const version = data.Item.version.N;
@@ -566,14 +627,18 @@ const server = http.createServer((req, res) => {
                         } else {
                             const assetId = getHash(uuidv4());
 
-                            createRecord('joseph', assetId, f.size, {
+                            const username = req.headers['hg-username'];
+                            console.log('hello');
+                            console.log(username);
+                            // todo: auth
+                            createRecord(username, assetId, f.size, {
                                 'Content-Type': f.headers['content-type']
                             }).then(() => {
 
                                 const childSession = fork(path.join(__dirname, 'upload.js'), 
                                     [
                                         `--path=${f.path}`, 
-                                        `--developer=joseph`, 
+                                        `--developer=${username}`, 
                                         `--id=${assetId}`, 
                                         `--name=${f.originalFilename}`, 
                                         `size=${f.size}`, 
@@ -585,12 +650,12 @@ const server = http.createServer((req, res) => {
                                     assetId
                                 }))
 
-                                return {
-                                    path: f.path,
-                                    size: f.size,
-                                    name: f.originalFilename,
-                                    contentType: f.headers['content-type']
-                                }
+//                                return {
+//                                    path: f.path,
+//                                    size: f.size,
+//                                    name: f.originalFilename,
+//                                    contentType: f.headers['content-type']
+//                                }
                             });
                         }
                     });
@@ -685,5 +750,5 @@ const server = http.createServer((req, res) => {
     }
 });
     
-server.listen(80);
+server.listen(7000);
 

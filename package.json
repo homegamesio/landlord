@@ -19,6 +19,7 @@
     "archiver": "^5.3.0",
     "aws-sdk": "^2.868.0",
     "crypto": "^1.0.1",
+    "homegames-common": "^0.1.34",
     "mmmagic": "^0.5.3",
     "multiparty": "^4.2.2",
     "unzipper": "^0.10.11",
