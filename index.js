@@ -120,7 +120,8 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
                     'assetId': i.asset_id.S,
                     'created': Number(i.created_at.N),
                     'status': i['status'].S,
-                    'type': JSON.parse(i['metadata'].S)['Content-Type']
+                    'type': JSON.parse(i['metadata'].S)['Content-Type'],
+                    'name': i.name && i.name.S || 'No name available'
                 };
             });
             resolve(res);
@@ -133,7 +134,7 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
 
 });
 
-const createRecord = (developerId, assetId, size, metadata) => new Promise((resolve, reject) => {
+const createRecord = (developerId, assetId, size, name, metadata) => new Promise((resolve, reject) => {
     const client = new aws.DynamoDB({region: 'us-west-2'});
     console.log('creating with');
     console.log(developerId);
@@ -145,7 +146,8 @@ const createRecord = (developerId, assetId, size, metadata) => new Promise((reso
             'created_at': {N: '' + Date.now()},
             'metadata': {S: JSON.stringify(metadata)},
             'status': {S: 'created'},
-            'size': {N: '' + size}
+            'size': {N: '' + size},
+            'name': {S: name}
         }
     };
 
@@ -647,6 +649,7 @@ const server = http.createServer((req, res) => {
                             res.end('no');
                         } else {
                             const fileValues = Object.values(files);
+                            console.log(files);
     
                             let hack = false;
     
@@ -668,7 +671,7 @@ const server = http.createServer((req, res) => {
                                     console.log('hello');
                                     console.log(username);
                                     // todo: auth
-                                    createRecord(username, assetId, f.size, {
+                                    createRecord(username, assetId, f.size, f.originalFilename, {
                                         'Content-Type': f.headers['content-type']
                                     }).then(() => {
     
@@ -771,5 +774,5 @@ const server = http.createServer((req, res) => {
     }
 });
     
-server.listen(80);
+server.listen(7000);
 
