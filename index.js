@@ -119,7 +119,8 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
                     'size': Number(i.size.N),
                     'assetId': i.asset_id.S,
                     'created': Number(i.created_at.N),
-                    'status': i['status'].S
+                    'status': i['status'].S,
+                    'type': JSON.parse(i['metadata'].S)['Content-Type']
                 };
             });
             resolve(res);
@@ -660,6 +661,7 @@ const server = http.createServer((req, res) => {
                     });
                 }).catch((err) => {
                     console.log(err);
+                    console.log('wat');
                     res.end('error');
                 });
             }

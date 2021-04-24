@@ -104,7 +104,17 @@ updateRecord(_developerId, _assetId, 'processing').then(() => {
         console.log('done uploading');
         updateRecord(_developerId, _assetId, 'complete').then(() => {
             console.log('finished!');
+        }).catch(err => {
+            console.log(err);
         });
-
+    }).catch((err) => {
+        console.log(err);
+        updateRecord(_developerId, _assetId, 'failed').then(() => {
+            console.log('finished failing');
+        }).catch(err => {
+            console.log(err);
+        });
     });
+}).catch((err) => {
+    console.log(err);
 });
