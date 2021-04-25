@@ -756,7 +756,7 @@ const server = http.createServer((req, res) => {
                                         TableName: 'hg_games',
                                         Item: {
                                             'game_id': {S: gameId},
-                                            'developer_id': {S: data.developer_id},
+                                            'developer_id': {S: username},
                                             'game_name': {S: data.game_name},
                                             'created_at': {N: '' + Date.now()},
                                             'dummy': {S: 'dummy'}
