@@ -582,7 +582,9 @@ const server = http.createServer((req, res) => {
                                     updated: g.updated_at,
                                     id: g.game_id,
                                     submitted_by: g.developer_id,
-                                    name: g.game_name
+                                    name: g.game_name,
+                                    description: g.description,
+                                    thumbnail: g.thumbnail
                                 }
                             })
                         }));
