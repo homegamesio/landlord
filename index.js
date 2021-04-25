@@ -494,15 +494,12 @@ const server = http.createServer((req, res) => {
                     params = {
                         TableName: 'hg_games',
                         ScanIndexForward: order === 'asc',
-                        IndexName: 'created_at_sort_index',
-                        KeyConditionExpression: '#devId = :devId and #dummy = :dummy',
+                        KeyConditionExpression: '#devId= :devId',
                         ExpressionAttributeNames: {
-                            '#devId': 'developer_id',
-                            '#dummy': 'dummy'
+                            '#devId': 'developer_id'
                         },
                         ExpressionAttributeValues: {
-                            ':devId': username,
-                            ':dummy': 'dummy'
+                            ':devId': username
                         }
                     };
                 }
