@@ -625,8 +625,11 @@ const server = http.createServer((req, res) => {
                                     res.end('You cannot modify a game that you didnt create');
                                 } else {
                                     updateGame(username, gameId, data).then(() => {
-                                        res.writeHead(200, {'Content-Type': 'application/json'});
-                                        res.end(JSON.stringify({success: true}));
+                                        // sigh. 
+                                        setTimeout(() => {
+                                            res.writeHead(200, {'Content-Type': 'application/json'});
+                                            res.end(JSON.stringify({success: true}));
+                                        }, 250);
                                     });
                                 }
                             });
