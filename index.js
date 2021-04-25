@@ -91,6 +91,69 @@ const getReqBody = (req, cb) => {
     });
 };
 
+const getGame = (developerId, gameId) => new Promise((resolve, reject) => {
+    const client = new aws.DynamoDB({region: 'us-west-2'});
+    const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+
+    const params = {
+        TableName: 'hg_games',
+        KeyConditionExpression: '#devId = :devId and #gameId = :gameId',
+        ExpressionAttributeNames: {
+            '#devId': 'developer_id',
+            '#gameId': 'game_id'
+        },
+        ExpressionAttributeValues: {
+            ':devId': developerId,
+            ':gameId': gameId
+        }
+    };
+
+    readClient.query(params, (err, result) => {
+        if (err) {
+            reject(err.toString());
+        } else {
+            if (result.Items.length) {
+                resolve(result.Items[0]);
+            } else {
+                reject('No results');
+            }
+        }
+    });
+});
+
+const updateGame = (developerId, gameId, newParams) => new Promise((resolve, reject) => {
+    const ddb = new aws.DynamoDB({region: 'us-west-2'});
+
+    const attributeUpdates = {};
+
+    if (newParams.description) {
+        attributeUpdates.description = {
+            Action: 'PUT',
+            Value: {
+                S: newParams.description
+            }
+        };
+    };
+
+    const updateParams = {
+        TableName: 'hg_games',
+        Key: {
+            'game_id': {S: gameId},
+            'developer_id': {S: developerId}
+        },
+        AttributeUpdates: attributeUpdates
+    };
+
+    ddb.updateItem(updateParams, (err, putResult) => {
+        if (!err) {
+            resolve();
+        } else {
+            reject();
+        }
+    });
+
+});
+
 const listAssets = (developerId) => new Promise((resolve, reject) => {
     console.log('dddd ' + developerId);
     const client = new aws.DynamoDB({region: 'us-west-2'});
@@ -531,7 +594,48 @@ const server = http.createServer((req, res) => {
         }
     } else if (req.method === 'POST') {
         const gamePublishRegex = new RegExp('/games/(\\S*)/publish');
-        if (req.url.match(gamePublishRegex)) {
+        const gameUpdateRegex = new RegExp('/games/(\\S*)/update');
+        if (req.url.match(gameUpdateRegex)) {
+            const username = req.headers['hg-username'];
+            const token = req.headers['hg-token'];
+
+            if (!username || !token) {
+                res.end('no');
+            } else {
+                verifyAccessToken(username, token).then(() => {
+                    const form = new multiparty.Form();
+ 
+                    getReqBody(req, (_data) => {
+                        const data = JSON.parse(_data);
+                        const client = new aws.DynamoDB({region: 'us-west-2'});
+                        const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+
+                        const _gameUpdateRegex = new RegExp('/games/(\\S*)/update');
+                        const gameId = _gameUpdateRegex.exec(req.url)[1];
+                        console.log("developer " + username + " wants to update " + gameId);
+                        console.log(data);
+                        const changed = data.description || data.thumbnail;
+
+                        if (changed) {
+                            getGame(username, gameId).then(gameRecord => {
+                                if (username != gameRecord.developer_id) {
+                                    res.writeHead(400, {'Content-Type': 'text/plain'});
+                                    res.end('You cannot modify a game that you didnt create');
+                                } else {
+                                    updateGame(username, gameId, data).then(() => {
+                                        res.writeHead(200, {'Content-Type': 'application/json'});
+                                        res.end(JSON.stringify({success: true}));
+                                    });
+                                }
+                            });
+                        } else {
+                            res.writeHead(400, {'Content-Type': 'text/plain'});
+                            res.end('No valid changes');
+                        }
+                    });
+                });
+            }
+        } else if (req.url.match(gamePublishRegex)) {
             const username = req.headers['hg-username'];
             const token = req.headers['hg-token'];
 
