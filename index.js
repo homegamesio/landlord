@@ -91,66 +91,104 @@ const getReqBody = (req, cb) => {
     });
 };
 
-const getGame = (developerId, gameId) => new Promise((resolve, reject) => {
-    const client = new aws.DynamoDB({region: 'us-west-2'});
-    const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+const getGame = (gameId, version = null) => new Promise((resolve, reject) => {
 
-    const params = {
-        TableName: 'hg_games',
-        KeyConditionExpression: '#devId = :devId and #gameId = :gameId',
-        ExpressionAttributeNames: {
-            '#devId': 'developer_id',
-            '#gameId': 'game_id'
-        },
-        ExpressionAttributeValues: {
-            ':devId': developerId,
-            ':gameId': gameId
-        }
-    };
+    if (version) {
+        const client = new aws.DynamoDB({region: 'us-west-2'});
 
-    readClient.query(params, (err, result) => {
-        if (err) {
-            reject(err.toString());
-        } else {
-            if (result.Items.length) {
-                resolve(result.Items[0]);
-            } else {
-                reject('No results');
-            }
-        }
-    });
-});
-
-const updateGame = (developerId, gameId, newParams) => new Promise((resolve, reject) => {
-    const ddb = new aws.DynamoDB({region: 'us-west-2'});
-
-    const attributeUpdates = {};
-
-    if (newParams.description) {
-        attributeUpdates.description = {
-            Action: 'PUT',
-            Value: {
-                S: newParams.description
+        const params = {
+            TableName: 'hg_games',
+            Key: {
+                "game_id": {
+                    S: gameId
+                }
             }
         };
-    };
 
-    const updateParams = {
-        TableName: 'hg_games',
-        Key: {
-            'game_id': {S: gameId},
-            'developer_id': {S: developerId}
-        },
-        AttributeUpdates: attributeUpdates
-    };
+        client.getItem(params, (err, result) => {
+            if (err) {
+                reject(err.toString());
+            } else {
+                if (result.Item) {
+                    resolve(mapGame(result.Item));
+                } else {
+                    reject('No results');
+                }
+            }
+        });
+    } else {
+        const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
 
-    ddb.updateItem(updateParams, (err, putResult) => {
-        if (!err) {
-            resolve();
-        } else {
-            reject();
-        }
-    });
+        console.log(gameId);
+        const params = {
+            TableName: 'hg_games',
+            ScanIndexForward: false,
+            KeyConditionExpression: '#game_id = :game_id',
+            ExpressionAttributeNames: {
+                '#game_id': 'game_id',
+            },
+            ExpressionAttributeValues: {
+                ':game_id': gameId
+            }
+        };
+
+        readClient.query(params, (err, results) => {
+            if (err) {
+                reject(err.toString());
+            } else {
+                if (results.Items.length) {
+                    console.log(results.Items);
+                    resolve(mapGame(results.Items[0]));
+                } else {
+                        reject("No results");
+                }
+            }
+        });
+    }
+});
+
+const mapGame = (dynamoRecord) => {
+    return {
+        name: dynamoRecord.game_name && dynamoRecord.game_name.S || dynamoRecord.game_name,
+        created: dynamoRecord.created && dynamoRecord.created.N || dynamoRecord.created,
+        author: dynamoRecord.developer_id && dynamoRecord.developer_id.S || dynamoRecord.developer_id,
+        id: dynamoRecord.game_id && dynamoRecord.game_id.S || dynamoRecord.game_id,
+        version: dynamoRecord.version && dynamoRecord.version.N || dynamoRecord.version,
+        description: dynamoRecord.description && dynamoRecord.description.S || dynamoRecord.description
+    }
+};
+
+const updateGame = (developerId, gameId, gameName, description, newVersion) => new Promise((resolve, reject) => {
+
+    if (description) {
+        const ddb = new aws.DynamoDB({region: 'us-west-2'});
+
+        const nowString = '' + Date.now();
+        const descriptionString = '' + description;
+
+        const params = {
+            TableName: 'hg_games',
+            Item: {
+                'game_id': {S: gameId},
+                'developer_id': {S: developerId},
+                'game_name': {S: gameName},
+                'created': {N: nowString},
+                'version': {N: newVersion},
+                'updated': {N: nowString},
+                'description': {S: descriptionString}
+            }
+        };
+        
+        ddb.putItem(params, (err, putResult) => {
+            if (!err) {
+                resolve(mapGame(params.Item));
+            } else {
+                reject();
+            }
+        });
+    } else {
+        resolve();
+    }
 
 });
 
@@ -181,7 +219,7 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
                     'developerId': i.developer_id.S,
                     'size': Number(i.size.N),
                     'assetId': i.asset_id.S,
-                    'created': Number(i.created_at.N),
+                    'created': Number(i.created.N),
                     'status': i['status'].S,
                     'type': JSON.parse(i['metadata'].S)['Content-Type'],
                     'name': i.name && i.name.S || 'No name available'
@@ -206,7 +244,7 @@ const createRecord = (developerId, assetId, size, name, metadata) => new Promise
         Item: {
             'developer_id': {S: developerId},
             'asset_id': {S: assetId},
-            'created_at': {N: '' + Date.now()},
+            'created': {N: '' + Date.now()},
             'metadata': {S: JSON.stringify(metadata)},
             'status': {S: 'created'},
             'size': {N: '' + size},
@@ -517,7 +555,7 @@ const server = http.createServer((req, res) => {
                 const results = data.Items.map(i => {
                     return {
                         version: i.version,
-                        created: new Date(i.created_at),
+                        created: new Date(i.created),
                         commit: i.commit,
                         'status': i.status,
                         'location': i.location
@@ -633,19 +671,26 @@ const server = http.createServer((req, res) => {
                         const changed = data.description || data.thumbnail;
 
                         if (changed) {
-                            getGame(username, gameId).then(gameRecord => {
-                                if (username != gameRecord.developer_id) {
+                            getGame(gameId).then(game => {
+                                if (username != game.author) {
                                     res.writeHead(400, {'Content-Type': 'text/plain'});
                                     res.end('You cannot modify a game that you didnt create');
                                 } else {
-                                    updateGame(username, gameId, data).then(() => {
-                                        // sigh. 
-                                        setTimeout(() => {
-                                            res.writeHead(200, {'Content-Type': 'application/json'});
-                                            res.end(JSON.stringify({success: true}));
-                                        }, 250);
-                                    });
+                                    const newVersion = '' + (Number(game.version) + 1);
+                                    if (data.description != game.description) {
+                                        updateGame(username, gameId, data.game_name, data.description, newVersion).then((_game) => {
+                                            // sigh. 
+                                            setTimeout(() => {
+                                                res.writeHead(200, {'Content-Type': 'application/json'});
+                                                res.end(JSON.stringify(_game));
+                                            }, 250);
+                                        });
+                                    } else {
+                                        res.end('hmmm');
+                                    }
                                 }
+                            }).catch(err => {
+                                res.end(err.toString());
                             });
                         } else {
                             res.writeHead(400, {'Content-Type': 'text/plain'});
@@ -730,7 +775,7 @@ const server = http.createServer((req, res) => {
                                                     Item: {
                                                         'game_id': {S: gameId},
                                                         'version': {N: newVersion},
-                                                        'created_at': {N: '' + Date.now()},
+                                                        'created': {N: '' + Date.now()},
                                                         'submitted_by': {S: 'todo'},
                                                         'location': {S: _location},
                                                         'commit': {S: data.commit},
@@ -844,11 +889,10 @@ const server = http.createServer((req, res) => {
                 res.end('no');
             } else {
                 verifyAccessToken(username, token).then(() => {
-            
                     getReqBody(req, (_data) => {
+                        console.log('sdd');
                         const data = JSON.parse(_data);
         
-                        const client = new aws.DynamoDB({region: 'us-west-2'});
                         const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
         
                         const params = {
@@ -870,22 +914,27 @@ const server = http.createServer((req, res) => {
                                 res.end(err.toString());
                             } else {
                                 if (result.Items.length) {
-                                    console.log(result);
-                                    res.writeHead(400);
+                                    res.writeHead(400, {'Content-Type': 'text/plain'});
                                     res.end('that already exists');
                                 } else {
                                     const gameId = generateGameId();
+                                    const nowString = '' + Date.now();
+                                    const descriptionString = ('' + data.description) || 'No description provided';
+                                    console.log('wat');
                                     const params = {
                                         TableName: 'hg_games',
                                         Item: {
                                             'game_id': {S: gameId},
                                             'developer_id': {S: username},
                                             'game_name': {S: data.game_name},
-                                            'created_at': {N: '' + Date.now()},
-                                            'dummy': {S: 'dummy'}
+                                            'created': {N: nowString},
+                                            'version': {N: '1'},
+                                            'updated': {N: nowString},
+                                            'description': {S: descriptionString}
                                         }
                                     };
         
+                                    const client = new aws.DynamoDB({region: 'us-west-2'});
                                     client.putItem(params, (err, putResult) => {
         
                                         console.log(err);
@@ -895,7 +944,7 @@ const server = http.createServer((req, res) => {
                                             res.writeHead(200, {
                                                 'Content-Type': 'application/json'
                                             });
-                                            res.end(JSON.stringify(params.Item));
+                                            res.end(JSON.stringify(mapGame(params.Item)));
                                         } else {
                                             res.end('error');
                                         }
@@ -904,6 +953,9 @@ const server = http.createServer((req, res) => {
                             }
                         });
                     });
+                }).catch(err => {
+                    console.log(err);
+                    res.end((err.errorMessage || err).toString());
                 });
             }
         }
@@ -912,5 +964,5 @@ const server = http.createServer((req, res) => {
     }
 });
     
-server.listen(80);
+server.listen(8000);
 
