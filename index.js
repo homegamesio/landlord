@@ -1,9 +1,9 @@
 const http = require('http');
+const https = require('https');
 const unzipper = require('unzipper');
 const url = require('url');
 const archiver = require('archiver');
 const fs = require('fs');
-const https = require('https');
 const aws = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
@@ -316,6 +316,41 @@ const testGame = (game) => new Promise((resolve, reject) => {
     }
 });
 
+const doSearch = (searchQuery) => new Promise((resolve, reject) => {
+    const data = JSON.stringify({
+        query: {
+            query_string: {
+                query: searchQuery
+            }
+        }
+    });
+
+    const options = {
+        hostname: 'hostname',
+        port: 443,
+        path: '/_search?pretty',
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': data.length
+        }
+    };
+
+    const req = https.request(options, _res => {
+        _res.on('data', d => {
+            res.writeHead(200, {
+                'Content-Type': 'application/json'
+            });
+
+            resolve(d.data);
+       });
+    });
+
+    req.write(data);
+
+    req.end();
+});
+
 const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) => {
 
     getCommit(owner, repo, commit).then(_res => {
@@ -502,29 +537,8 @@ const server = http.createServer((req, res) => {
             const searchQuery = queryObject.query;
 
             if (searchQuery) {
-                const queryParams = {
-                    TableName: 'hg_games',
-                    IndexName: 'game_name_sort_index',
-                    ScanIndexForward: true,
-                    KeyConditionExpression: '#dummy = :dummy and begins_with(#game_name, :game_name_query)',
-                    ExpressionAttributeNames: {
-                        '#game_name': 'game_name',
-                        '#dummy': 'dummy'
-                    },
-                    ExpressionAttributeValues: {
-                        ':game_name_query': searchQuery,
-                        ':dummy': 'dummy'
-                    }
-                }
-
-                client.query(queryParams, (err, data) => {
-                    res.writeHead(200, {
-                        'Content-Type': 'application/json'
-                    });
-
-                    res.end(JSON.stringify({
-                        games: data.Items
-                    }));
+                doSearch(searchQuery).then(d => {
+                    res.end(JSON.stringify({games: d}));
                 });
             } else {
                 const username = req.headers['hg-username'];
