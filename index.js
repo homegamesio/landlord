@@ -573,13 +573,37 @@ const server = http.createServer((req, res) => {
             const queryObject = url.parse(req.url,true).query;
 
             const searchQuery = queryObject.query;
+            
+            const requester = req.headers['hg-username'];
+                            
+            if (queryObject.author) {
+                console.log("want games for just author");
+                const queryParams = {
+                    TableName: 'hg_games',
+                    ScanIndexForward: false,
+                    IndexName: 'dev_game_name_index',
+                    KeyConditionExpression: '#developer_id = :developer_id',
+                    ExpressionAttributeNames: {
+                        '#developer_id': 'developer_id'
+                    },
+                    ExpressionAttributeValues: {
+                        ':developer_id': queryObject.author
+                    }
+                };
 
-            if (searchQuery) {
+                client.query(queryParams, (err, data) => {
+                    const gameList = data.Items.map(mapGame);
+                    res.writeHead(200, {
+                        'Content-Type': 'application/json'
+                    });
+
+                    res.end(JSON.stringify({games: gameList}));
+                });
+            } else if (searchQuery) {
                 doSearch(searchQuery).then(d => {
                     res.end(JSON.stringify({games: d}));
                 });
             } else {
-                const username = req.headers['hg-username'];
 
                 const sort = queryObject.sort || 'name';
                 const order = queryObject.order || 'asc';
@@ -592,7 +616,7 @@ const server = http.createServer((req, res) => {
 
                 let params = {};
 
-                if (!username) {
+                if (!requester) {
                     params = {
                         TableName: 'hg_games',
                         ScanIndexForward: order === 'asc',
@@ -614,7 +638,7 @@ const server = http.createServer((req, res) => {
                             '#devId': 'developer_id'
                         },
                         ExpressionAttributeValues: {
-                            ':devId': username
+                            ':devId': requester 
                         }
                     };
                 }
