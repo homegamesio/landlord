@@ -262,10 +262,14 @@ const createRecord = (developerId, assetId, size, name, metadata) => new Promise
 
 });
 
+const GITHUB_USER = '';
+const GITHUB_KEY = '';
+const ELASTIC_SEARCH_HOST = '';
+
 const getOwnerEmail = (owner) => new Promise((resolve, reject) => {
      const _headers = {
         'User-Agent': 'HomegamesLandlord/0.1.0',
-        'Authorization': 'Basic ' + Buffer.from('prosif' + ':' + 'whoops').toString('base64')
+        'Authorization': 'Basic ' + Buffer.from(`${GITHUB_USER}:${GITHUB_KEY}`).toString('base64')
     };
 
     https.get({
@@ -364,9 +368,9 @@ const doSearch = (searchQuery) => new Promise((resolve, reject) => {
     });
 
     const options = {
-        hostname: 'hostname',
+        hostname: ELASTIC_SEARCH_HOST,
         port: 443,
-        path: '/_search?pretty',
+        path: '/lambda-index/_search?pretty',
         method: 'GET',
         headers: {
             'Content-Type': 'application/json',
@@ -376,17 +380,56 @@ const doSearch = (searchQuery) => new Promise((resolve, reject) => {
 
     const req = https.request(options, _res => {
         _res.on('data', d => {
-            res.writeHead(200, {
-                'Content-Type': 'application/json'
-            });
-
-            resolve(d.data);
+            resolve(JSON.parse(d));
        });
     });
 
     req.write(data);
 
     req.end();
+});
+
+const DEFAULT_GAME_ORDER = {'game_name': {order: 'asc'}};
+
+const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null) => new Promise((resolve, reject) => {
+
+    const _data = {
+	from: offset,
+	size: limit,
+	sort
+    };
+
+    if (query) {
+	_data.query = {
+		query_string: {
+			query
+		}
+	}
+    }
+
+    const data = JSON.stringify(_data);
+
+    const options = {
+        hostname: ELASTIC_SEARCH_HOST,
+        port: 443,
+        path: '/lambda-index/_search?pretty',
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': data.length
+        }
+    };
+
+    const req = https.request(options, _res => {
+        _res.on('data', d => {
+            resolve(JSON.parse(d));
+       });
+    });
+
+    req.write(data);
+
+    req.end();
+
 });
 
 const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) => {
@@ -603,6 +646,9 @@ const server = http.createServer((req, res) => {
                 doSearch(searchQuery).then(d => {
                     res.end(JSON.stringify({games: d}));
                 });
+//            	listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery).then(d => {
+//               	    res.end(JSON.stringify({games: d}));
+//	        });
             } else {
 
                 const sort = queryObject.sort || 'name';
@@ -665,11 +711,11 @@ const server = http.createServer((req, res) => {
                             })
                         }));
                     }
-                });
-            }
-        } else {
-            res.end('ok');
-        }
+		});
+	    }
+	} else {
+		res.end('ok');
+	} 
     } else if (req.method === 'POST') {
         const gamePublishRegex = new RegExp('/games/(\\S*)/publish');
         const gameUpdateRegex = new RegExp('/games/(\\S*)/update');
@@ -988,5 +1034,4 @@ const server = http.createServer((req, res) => {
     }
 });
     
-server.listen(8000);
-
+server.listen(80);
