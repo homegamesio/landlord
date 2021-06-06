@@ -15,6 +15,69 @@ const { fork } = require('child_process');
 const path = require('path');
 const { verifyAccessToken } = require('homegames-common');
 
+const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
+    const __data = JSON.stringify({
+        aggs: {
+            tags: {
+                terms: {
+                    field: 'tag_id'
+                }
+            }
+        }
+
+    });
+
+    if (__gameId) {
+        __data.query = {
+            term: {
+                'game_id': {
+                    value: __gameId
+                }
+            }
+        };
+    } else if (__userId) {
+    __data.query = {
+        term: {
+        'user_id': {
+            value: __userId
+        }
+        }
+    }
+    }
+
+    const __options = {
+        hostname: ELASTIC_SEARCH_HOST,
+        port: 443,
+        path: '/tag-index/_search?size=0',
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': __data.length
+        }
+    };
+
+    const __req = https.request(__options, __res => {
+        __res.on('data', __d => {
+            const __buf = JSON.parse(__d);
+            console.log(__buf);
+            if (__buf.aggregations && __buf.aggregations.tags.buckets.length > 0) {
+                const __results = __buf.aggregations.tags.buckets.map(item => item.key);//mapGame(hit._source));
+                __resolve(__results);
+            } else {
+                __resolve([]);
+            }
+
+        });
+    });
+
+    __req.write(__data);
+
+    __req.end();
+});
+
+
+ 
+
 const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
     // todo: uuid
     const dir = `/tmp/${Date.now()}`;
@@ -714,7 +777,33 @@ const server = http.createServer((req, res) => {
                     res.end('error');
                 });
             }
-        } else if (req.url.startsWith('/confirm')) {
+        } else if (req.url.startsWith('/tags')) {
+            const queryObject = url.parse(req.url,true).query;  
+        const userFilter = queryObject.user;
+
+            if (userFilter) {
+                const username = req.headers['hg-username'];
+                const token = req.headers['hg-token'];
+
+                if (!username || !token) {
+                    res.end('no');
+                } else {
+            if (username !== userFilter) {
+                        res.end('not matching');
+            } else {
+                        verifyAccessToken(username, token).then(() => {
+                    getTags(null, userFilter).then(tags => {
+                        res.end(JSON.stringify({tags}));
+                    });
+                });
+            }
+            }
+        } else {
+                getTags().then(tags => {
+                res.end(JSON.stringify({tags}));
+                });
+        }
+    } else if (req.url.startsWith('/confirm')) {
             const queryObject = url.parse(req.url,true).query;
 
             const code = queryObject.code;
@@ -833,58 +922,7 @@ const server = http.createServer((req, res) => {
                         'location': i.location
                     };
                 });
-
-                const getTags = (__gameId) => new Promise((__resolve, __reject) => {
-                    const __data = JSON.stringify({
-                        query: {
-                            term: {
-                                'game_id': {
-                                    value: __gameId
-                                }
-                            }
-                        },
-                        aggs: {
-                            tags: {
-                                terms: {
-                                    field: 'tag_id'
-                                }
-                            }
-                        }
-                
-                    });
-            
-                    const __options = {
-                        hostname: ELASTIC_SEARCH_HOST,
-                        port: 443,
-                        path: '/tag-index/_search?size=0',
-                        method: 'GET',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Content-Length': __data.length
-                        }
-                    };
-            
-                    const __req = https.request(__options, __res => {
-                        __res.on('data', __d => {
-                            const __buf = JSON.parse(__d);
-                            console.log(__buf);
-                            if (__buf.aggregations && __buf.aggregations.tags.buckets.length > 0) {
-                                const __results = __buf.aggregations.tags.buckets.map(item => item.key);//mapGame(hit._source));
-                                __resolve(__results);
-                            } else {
-                                __resolve([]);
-                            }
-                
-                        });
-                    });
-            
-                    __req.write(__data);
-            
-                    __req.end();
-                });
-
-
-        
+       
 
                 getTags(gameId).then(tags => {
 
