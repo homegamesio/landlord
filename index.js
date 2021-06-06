@@ -5,14 +5,22 @@ const url = require('url');
 const archiver = require('archiver');
 const fs = require('fs');
 const aws = require('aws-sdk');
-const { v4: uuidv4 } = require('uuid');
+const {
+    v4: uuidv4
+} = require('uuid');
 const crypto = require('crypto');
 const util = require('util');
-const { parse } = require('querystring');
+const {
+    parse
+} = require('querystring');
 const multiparty = require('multiparty');
-const { fork } = require('child_process');
+const {
+    fork
+} = require('child_process');
 const path = require('path');
-const { verifyAccessToken } = require('homegames-common');
+const {
+    verifyAccessToken
+} = require('homegames-common');
 
 const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
     const __data = JSON.stringify({
@@ -35,13 +43,13 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
             }
         };
     } else if (__userId) {
-    __data.query = {
-        term: {
-        'user_id': {
-            value: __userId
+        __data.query = {
+            term: {
+                'user_id': {
+                    value: __userId
+                }
+            }
         }
-        }
-    }
     }
 
     const __options = {
@@ -60,7 +68,7 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
             const __buf = JSON.parse(__d);
             console.log(__buf);
             if (__buf.aggregations && __buf.aggregations.tags.buckets.length > 0) {
-                const __results = __buf.aggregations.tags.buckets.map(item => item.key);//mapGame(hit._source));
+                const __results = __buf.aggregations.tags.buckets.map(item => item.key); //mapGame(hit._source));
                 __resolve(__results);
             } else {
                 __resolve([]);
@@ -75,7 +83,7 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
 });
 
 
- 
+
 
 const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
     // todo: uuid
@@ -97,8 +105,10 @@ const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reje
                 });
             });
         });
-    
-        const stream = _response.pipe(unzipper.Extract({ path: dir }));
+
+        const stream = _response.pipe(unzipper.Extract({
+            path: dir
+        }));
 
         stream.on('finish', () => {
             archive.directory(dir, false);
@@ -119,7 +129,7 @@ const getCommit = (owner, repo, commit = undefined) => new Promise((resolve, rej
         path: `/repos/${owner}/${repo}${commit ? '/' + commit : ''}`,
         headers: _headers
     }, res => {
-        
+
         let _buf = '';
 
         res.on('end', () => {
@@ -128,7 +138,7 @@ const getCommit = (owner, repo, commit = undefined) => new Promise((resolve, rej
 
         res.on('data', (_data) => {
             _buf += _data;
-        }); 
+        });
 
     });
 });
@@ -156,7 +166,9 @@ const getReqBody = (req, cb) => {
 const getGame = (gameId, version = null) => new Promise((resolve, reject) => {
 
     if (version) {
-        const client = new aws.DynamoDB({region: 'us-west-2'});
+        const client = new aws.DynamoDB({
+            region: 'us-west-2'
+        });
 
         const params = {
             TableName: 'hg_games',
@@ -179,7 +191,9 @@ const getGame = (gameId, version = null) => new Promise((resolve, reject) => {
             }
         });
     } else {
-        const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+        const readClient = new aws.DynamoDB.DocumentClient({
+            region: 'us-west-2'
+        });
 
         console.log(gameId);
         const params = {
@@ -204,7 +218,7 @@ const getGame = (gameId, version = null) => new Promise((resolve, reject) => {
                     const mapped = mapGame(results.Items[0]);
                     console.log('mapped');
                     console.log(mapped);
-                    resolve(mapped);//Game(results.Items[0]));
+                    resolve(mapped); //Game(results.Items[0]));
                 } else {
                     reject('No results');
                 }
@@ -228,66 +242,82 @@ const mapGame = (dynamoRecord) => {
 const updateGame = (developerId, gameId, gameName, description, newVersion) => new Promise((resolve, reject) => {
 
     if (description) {
-        const ddb = new aws.DynamoDB({region: 'us-west-2'});
+        const ddb = new aws.DynamoDB({
+            region: 'us-west-2'
+        });
 
         const nowString = '' + Date.now();
         const descriptionString = '' + description;
         const params = {
             RequestItems: {
-                'hg_games': [
-                    {
+                'hg_games': [{
                         PutRequest: {
                             Item: {
-                                'game_composite': {S: `latest:${gameId}`},
-                                'game_id': {S: gameId},
-                                'developer_id': {S: developerId},
-                                'game_name': {S: gameName},
-                                'created': {N: nowString},
-                                'version': {N: newVersion},
-                                'updated': {N: nowString},
-                                'description': {S: descriptionString}
+                                'game_composite': {
+                                    S: `latest:${gameId}`
+                                },
+                                'game_id': {
+                                    S: gameId
+                                },
+                                'developer_id': {
+                                    S: developerId
+                                },
+                                'game_name': {
+                                    S: gameName
+                                },
+                                'created': {
+                                    N: nowString
+                                },
+                                'version': {
+                                    N: newVersion
+                                },
+                                'updated': {
+                                    N: nowString
+                                },
+                                'description': {
+                                    S: descriptionString
+                                }
                             }
                         }
                     },
                     {
                         PutRequest: {
                             Item: {
-                                'game_composite': {S: `${gameId}:${newVersion}`},
-                                'game_id': {S: gameId},
-                                'developer_id': {S: developer},
-                                'game_name': {S: gameName},
-                                'created': {N: nowString},
-                                'version': {N: newVersion},
-                                'updated': {N: nowString},
-                                'description': {S: descriptionString}
+                                'game_composite': {
+                                    S: `${gameId}:${newVersion}`
+                                },
+                                'game_id': {
+                                    S: gameId
+                                },
+                                'developer_id': {
+                                    S: developer
+                                },
+                                'game_name': {
+                                    S: gameName
+                                },
+                                'created': {
+                                    N: nowString
+                                },
+                                'version': {
+                                    N: newVersion
+                                },
+                                'updated': {
+                                    N: nowString
+                                },
+                                'description': {
+                                    S: descriptionString
+                                }
                             }
                         }
                     }
                 ]
             }
         };
-        
-        const client = new aws.DynamoDB({region: 'us-west-2'});
-        client.batchWriteItem(params, (err, putResult) => {
- 
 
-            //        const params = {
-            //            TableName: 'hg_games',
-            //            Item: {
-            //                'game_id': {S: gameId},
-            //                'developer_id': {S: developerId},
-            //                'game_name': {S: gameName},
-            //                'created': {N: nowString},
-            //                'version': {N: newVersion},
-            //                'updated': {N: nowString},
-            //                'description': {S: descriptionString}
-            //            }
-            //        };
-            //
-            //  console.log('params');
-            //      console.log(params);
-            //        
-            //        ddb.putItem(params, (err, putResult) => {
+        const client = new aws.DynamoDB({
+            region: 'us-west-2'
+        });
+        client.batchWriteItem(params, (err, putResult) => {
             if (!err) {
                 resolve(mapGame(params.Item));
             } else {
@@ -303,7 +333,9 @@ const updateGame = (developerId, gameId, gameName, description, newVersion) => n
 
 const listAssets = (developerId) => new Promise((resolve, reject) => {
     console.log('dddd ' + developerId);
-    const client = new aws.DynamoDB({region: 'us-west-2'});
+    const client = new aws.DynamoDB({
+        region: 'us-west-2'
+    });
 
     const params = {
         TableName: 'homegames_assets',
@@ -335,28 +367,39 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
                 };
             });
             resolve(res);
-            //            resolve();
         } else {
             console.log(err);
-            //          reject(err);
+            reject();
         }
     });
 
 });
 
 const tagGame = (tagId, gameId, userId) => new Promise((resolve, reject) => {
-    if (tagId.length == 0 || tagId.length  > 20) {
+    if (tagId.length == 0 || tagId.length > 20) {
         reject('tag must be between 1-20 characters');
     }
-    const client = new aws.DynamoDB({region: 'us-west-2'});
+    const client = new aws.DynamoDB({
+        region: 'us-west-2'
+    });
     const params = {
         TableName: 'hg_tags',
         Item: {
-            'user_id': {S: userId},
-            'tag': {S: `${userId}:${tagId}`},
-            'tag_id': {S: tagId.split(' ')[0]},
-            'game_id': {S: gameId},
-            'created': {N: `${Date.now()}`}
+            'user_id': {
+                S: userId
+            },
+            'tag': {
+                S: `${userId}:${tagId}`
+            },
+            'tag_id': {
+                S: tagId.split(' ')[0]
+            },
+            'game_id': {
+                S: gameId
+            },
+            'created': {
+                N: `${Date.now()}`
+            }
         }
     };
 
@@ -372,19 +415,35 @@ const tagGame = (tagId, gameId, userId) => new Promise((resolve, reject) => {
 
 
 const createRecord = (developerId, assetId, size, name, metadata) => new Promise((resolve, reject) => {
-    const client = new aws.DynamoDB({region: 'us-west-2'});
+    const client = new aws.DynamoDB({
+        region: 'us-west-2'
+    });
     console.log('creating with');
     console.log(developerId);
     const params = {
         TableName: 'homegames_assets',
         Item: {
-            'developer_id': {S: developerId},
-            'asset_id': {S: assetId},
-            'created': {N: '' + Date.now()},
-            'metadata': {S: JSON.stringify(metadata)},
-            'status': {S: 'created'},
-            'size': {N: '' + size},
-            'name': {S: name}
+            'developer_id': {
+                S: developerId
+            },
+            'asset_id': {
+                S: assetId
+            },
+            'created': {
+                N: '' + Date.now()
+            },
+            'metadata': {
+                S: JSON.stringify(metadata)
+            },
+            'status': {
+                S: 'created'
+            },
+            'size': {
+                N: '' + size
+            },
+            'name': {
+                S: name
+            }
         }
     };
 
@@ -409,7 +468,7 @@ const getOwnerEmail = (owner) => new Promise((resolve, reject) => {
         path: `/users/${owner}`,
         headers: _headers
     }, res => {
-        
+
         let _buf = '';
 
         res.on('end', () => {
@@ -419,7 +478,7 @@ const getOwnerEmail = (owner) => new Promise((resolve, reject) => {
 
         res.on('data', (_data) => {
             _buf += _data;
-        }); 
+        });
 
     });
 });
@@ -428,16 +487,28 @@ const createCode = (email, gameId, commit, version) => new Promise((resolve, rej
 
     const code = getHash(uuidv4());
 
-    const client = new aws.DynamoDB({region: 'us-west-2'});
+    const client = new aws.DynamoDB({
+        region: 'us-west-2'
+    });
 
     const params = {
         TableName: 'hg_requests',
         Item: {
-            'code': {S: code},
-            'game_id': {S: gameId},
-            'commit': {S: commit },
-            'status': {S: 'created'},
-            'version': {N: version}
+            'code': {
+                S: code
+            },
+            'game_id': {
+                S: gameId
+            },
+            'commit': {
+                S: commit
+            },
+            'status': {
+                S: 'created'
+            },
+            'version': {
+                N: version
+            }
         }
     };
 
@@ -448,12 +519,14 @@ const createCode = (email, gameId, commit, version) => new Promise((resolve, rej
             resolve(code);
         }
     });
- 
+
 });
 
 const emailOwner = (owner, code, commit) => new Promise((resolve, reject) => {
     getOwnerEmail(owner).then(_email => {
-        const ses = new aws.SES({region: 'us-west-2'});
+        const ses = new aws.SES({
+            region: 'us-west-2'
+        });
         const params = {
             Destination: {
                 ToAddresses: [
@@ -465,7 +538,7 @@ const emailOwner = (owner, code, commit) => new Promise((resolve, reject) => {
                     Html: {
                         Charset: 'UTF-8',
                         Data: `<html><body><a href="https://landlord.homegames.io/confirm?code=${code}&commit=${commit}">here</a> to confirm this submission</body></html>`
-                    }   
+                    }
                 },
                 Subject: {
                     Charset: 'UTF-8',
@@ -498,28 +571,6 @@ const doSearch = (searchQuery) => new Promise((resolve, reject) => {
                 query: searchQuery,
                 fuzziness: 'AUTO'
             }
-            //    query_string: {
-            //      {
-            //          query: searchQuery
-            //      }
-            //    },
-            //            match: {
-            //      game_name: {
-            //                  query: searchQuery,
-            //        fuzziness: "AUTO"
-            //      },
-            //      author: {
-            //                  query: searchQuery,
-            //        fuzziness: "AUTO"
-            //      },
-            //          description: {
-            //                  query: searchQuery,
-            //        fuzziness: "AUTO"
-            //      } 
-            //            },
-            //            exists: {
-            //              field: 'latest_approved_version'
-            //      }
         }
     });
 
@@ -543,7 +594,7 @@ const doSearch = (searchQuery) => new Promise((resolve, reject) => {
             } else {
                 resolve();
             }
-    
+
         });
     });
 
@@ -552,7 +603,11 @@ const doSearch = (searchQuery) => new Promise((resolve, reject) => {
     req.end();
 });
 
-const DEFAULT_GAME_ORDER = {'game_name': {order: 'asc'}};
+const DEFAULT_GAME_ORDER = {
+    'game_name': {
+        order: 'asc'
+    }
+};
 
 const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
 
@@ -568,9 +623,9 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
 
     if (tags.length > 0) {
         _data.query = {
-        terms: {
-            tag_id: tags
-        }
+            terms: {
+                tag_id: tags
+            }
         };
 
         data = JSON.stringify(_data);
@@ -587,86 +642,85 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
         };
 
         // this is terrible
-        
-    let gameIds = [];
+
+        let gameIds = [];
 
         const req = https.request(options, _res => {
             let _buf = '';
             _res.on('data', d => {
                 _buf += d;
             });
-    
+
             _res.on('end', () => {
                 const buf = JSON.parse(_buf);
                 console.log('tag response');
                 console.log(buf);
-        if (buf.hits && buf.hits.hits) {
-                gameIds = buf.hits.hits.map(hit => hit._source);
-        }
-
-        const gameQuery = {
-            query: {
-                bool: {
-                    must: [
-                        {
-                            exists: {
-                                field: 'latest_approved_version'
-                            },
-                        },
-                        {
-                            terms: {
-                                game_id: gameIds
-                            }
-                        },
-                    ]
+                if (buf.hits && buf.hits.hits) {
+                    gameIds = buf.hits.hits.map(hit => hit._source);
                 }
-            },
-            sort
-        };
 
-        const gameReq = JSON.stringify(gameQuery);
+                const gameQuery = {
+                    query: {
+                        bool: {
+                            must: [{
+                                    exists: {
+                                        field: 'latest_approved_version'
+                                    },
+                                },
+                                {
+                                    terms: {
+                                        game_id: gameIds
+                                    }
+                                },
+                            ]
+                        }
+                    },
+                    sort
+                };
 
-            const gameOptions = {
-                hostname: ELASTIC_SEARCH_HOST,
-                port: 443,
-                path: '/lambda-index/_search',
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': gameReq.length
-                }
-            };
-    
-            const req2 = https.request(gameOptions, _res2 => {
-                let _buf2 = '';
-                _res2.on('data', d2 => {
-                    _buf2 += d2;
-                });
-        
-                _res2.on('end', () => {
-                    const buf2 = JSON.parse(_buf2);
-                    console.log('games from tags giigig');
-                    console.log(buf2);
-                    let gameList = [];
-                    if (buf2.hits && buf2.hits.total.value > 0) {
-                        console.log('I know I have games');
-                        console.log(buf2.hits.hits);
-                        gameList = buf2.hits.hits.map(hit => mapGame(hit._source));
+                const gameReq = JSON.stringify(gameQuery);
+
+                const gameOptions = {
+                    hostname: ELASTIC_SEARCH_HOST,
+                    port: 443,
+                    path: '/lambda-index/_search',
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': gameReq.length
                     }
-        
-                    resolve(gameList);
+                };
+
+                const req2 = https.request(gameOptions, _res2 => {
+                    let _buf2 = '';
+                    _res2.on('data', d2 => {
+                        _buf2 += d2;
+                    });
+
+                    _res2.on('end', () => {
+                        const buf2 = JSON.parse(_buf2);
+                        console.log('games from tags giigig');
+                        console.log(buf2);
+                        let gameList = [];
+                        if (buf2.hits && buf2.hits.total.value > 0) {
+                            console.log('I know I have games');
+                            console.log(buf2.hits.hits);
+                            gameList = buf2.hits.hits.map(hit => mapGame(hit._source));
+                        }
+
+                        resolve(gameList);
+                    });
+                });
+
+                req2.write(gameReq);
+                req2.end();
+
             });
+
         });
 
-        req2.write(gameReq);
-        req2.end();
-
-            });
-    
-        });
-    
         req.write(data);
-    
+
         req.end();
 
     } else {
@@ -675,15 +729,15 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
                 field: 'latest_approved_version'
             }
         };
-        
-    _data.sort = sort;
- 
+
+        _data.sort = sort;
+
         if (query) {
             _data.query.query_string = query;
         }
 
         data = JSON.stringify(_data);
-    
+
         options = {
             hostname: ELASTIC_SEARCH_HOST,
             port: 443,
@@ -700,7 +754,7 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
             _res.on('data', d => {
                 _buf += d;
             });
-    
+
             _res.on('end', () => {
                 const buf = JSON.parse(_buf);
                 console.log('giigig');
@@ -711,14 +765,14 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
                     console.log(buf.hits.hits);
                     gameList = buf.hits.hits.map(hit => mapGame(hit._source));
                 }
-    
+
                 resolve(gameList);
             });
-    
+
         });
-    
+
         req.write(data);
-    
+
         req.end();
     }
 });
@@ -729,23 +783,15 @@ const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) =
 
         getBuild(owner, repo, commit).then((dir) => {
             const cmd = ['--prefix', dir.path, 'install'];
-            const { exec } = require('child_process');
+            const {
+                exec
+            } = require('child_process');
             exec('npm --prefix ' + dir.path + ' install', (err, stdout, stderr) => {
                 const _game = require(dir.path);
                 resolve(_game);
             });
-            // todo: this
-            //const sourceNodeModules = 'INSERTHERE';
-            //            fs.symlink(sourceNodeModules, dir + '/node_modules', 'dir', (err) => {
-            //                if (!err) {
-            //                    const _game = require(dir);
-            //                    resolve(_game);
-            //                } else {
-            //                    reject(err);
-            //                }
-            //            });
         });
-    
+
     });
 
 });
@@ -768,8 +814,10 @@ const server = http.createServer((req, res) => {
                         res.writeHead(200, {
                             'Content-Type': 'application/json'
                         });
- 
-                        res.end(JSON.stringify({ assets }));
+
+                        res.end(JSON.stringify({
+                            assets
+                        }));
                     });
                 }).catch((err) => {
                     console.log(err);
@@ -777,8 +825,8 @@ const server = http.createServer((req, res) => {
                 });
             }
         } else if (req.url.startsWith('/tags')) {
-            const queryObject = url.parse(req.url,true).query;  
-        const userFilter = queryObject.user;
+            const queryObject = url.parse(req.url, true).query;
+            const userFilter = queryObject.user;
 
             if (userFilter) {
                 const username = req.headers['hg-username'];
@@ -787,34 +835,44 @@ const server = http.createServer((req, res) => {
                 if (!username || !token) {
                     res.end('no');
                 } else {
-            if (username !== userFilter) {
+                    if (username !== userFilter) {
                         res.end('not matching');
-            } else {
+                    } else {
                         verifyAccessToken(username, token).then(() => {
-                    getTags(null, userFilter).then(tags => {
-                        res.end(JSON.stringify({tags}));
-                    });
-                });
-            }
-            }
-        } else {
+                            getTags(null, userFilter).then(tags => {
+                                res.end(JSON.stringify({
+                                    tags
+                                }));
+                            });
+                        });
+                    }
+                }
+            } else {
                 getTags().then(tags => {
-                res.end(JSON.stringify({tags}));
+                    res.end(JSON.stringify({
+                        tags
+                    }));
                 });
-        }
-    } else if (req.url.startsWith('/confirm')) {
-            const queryObject = url.parse(req.url,true).query;
+            }
+        } else if (req.url.startsWith('/confirm')) {
+            const queryObject = url.parse(req.url, true).query;
 
             const code = queryObject.code;
             const commit = queryObject.commit;
 
-            const ddb = new aws.DynamoDB({region: 'us-west-2'});
+            const ddb = new aws.DynamoDB({
+                region: 'us-west-2'
+            });
 
             const params = {
                 TableName: 'hg_requests',
                 Key: {
-                    'code': {S: code},
-                    'commit': {S: commit}
+                    'code': {
+                        S: code
+                    },
+                    'commit': {
+                        S: commit
+                    }
                 }
             };
 
@@ -826,24 +884,32 @@ const server = http.createServer((req, res) => {
                     const gameVersion = ddb.getItem({
                         TableName: 'hg_game_versions',
                         Key: {
-                            'game_id': {S: gameId},
-                            'version': {N: '' + version}
+                            'game_id': {
+                                S: gameId
+                            },
+                            'version': {
+                                N: '' + version
+                            }
                         }
                     }, (err, data) => {
                         console.log('got data');
                         console.log(data);
-                        
+
                         const updateParams = {
                             TableName: 'hg_game_versions',
                             Key: {
-                                'game_id': {S: gameId},
-                                'version': {N: '' + version}
+                                'game_id': {
+                                    S: gameId
+                                },
+                                'version': {
+                                    N: '' + version
+                                }
                             },
                             AttributeUpdates: {
                                 'status': {
-                                    Action: 'PUT', 
+                                    Action: 'PUT',
                                     Value: {
-                                        S: 'approved' 
+                                        S: 'approved'
                                     }
                                 },
                                 'approved_at': {
@@ -858,8 +924,12 @@ const server = http.createServer((req, res) => {
                         const reqUpdateParams = {
                             TableName: 'hg_requests',
                             Key: {
-                                'code': {S: code},
-                                'commit': {S: commit}
+                                'code': {
+                                    S: code
+                                },
+                                'commit': {
+                                    S: commit
+                                }
                             },
                             AttributeUpdates: {
                                 'status': {
@@ -897,7 +967,9 @@ const server = http.createServer((req, res) => {
         } else if (req.url.match(gameDetailRegex)) {
             const gameId = gameDetailRegex.exec(req.url)[1].split('?')[0];
 
-            const client = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+            const client = new aws.DynamoDB.DocumentClient({
+                region: 'us-west-2'
+            });
 
             const params = {
                 TableName: 'hg_game_versions',
@@ -921,7 +993,7 @@ const server = http.createServer((req, res) => {
                         'location': i.location
                     };
                 });
-       
+
 
                 getTags(gameId).then(tags => {
 
@@ -930,19 +1002,24 @@ const server = http.createServer((req, res) => {
                     res.writeHead(200, {
                         'Content-Type': 'application/json'
                     });
-                    res.end(JSON.stringify({ tags, versions: results }));
+                    res.end(JSON.stringify({
+                        tags,
+                        versions: results
+                    }));
                 });
 
             });
         } else if (req.url.startsWith('/games')) {
-            const client = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
-            const queryObject = url.parse(req.url,true).query;
+            const client = new aws.DynamoDB.DocumentClient({
+                region: 'us-west-2'
+            });
+            const queryObject = url.parse(req.url, true).query;
 
             const searchQuery = queryObject.query;
             const tags = queryObject.tags;
 
             const requester = req.headers['hg-username'];
-                            
+
             if (queryObject.author) {
                 console.log('want games for just author');
                 const queryParams = {
@@ -967,91 +1044,33 @@ const server = http.createServer((req, res) => {
                             'Content-Type': 'application/json'
                         });
 
-                        res.end(JSON.stringify({games: gameList}));
+                        res.end(JSON.stringify({
+                            games: gameList
+                        }));
                     } else {
-                        res.end({error: err});
+                        res.end({
+                            error: err
+                        });
                     }
                 });
             } else if (searchQuery) {
                 doSearch(searchQuery).then(d => {
-                    res.end(JSON.stringify({games: d}));
+                    res.end(JSON.stringify({
+                        games: d
+                    }));
                 });
-                //              listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery).then(d => {
-                //                      res.end(JSON.stringify({games: d}));
-                //          });
             } else {
                 listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags.split(',')).then(d => {
                     console.log('GAMES');
                     console.log(d);
-                    res.end(JSON.stringify({games: d}));
+                    res.end(JSON.stringify({
+                        games: d
+                    }));
                 });
-
-
-                //                const sort = queryObject.sort || 'name';
-                //                const order = queryObject.order || 'asc';
-                //
-                //                const indexMap = {
-                //                    'name': 'game_name_sort_index',
-                //                    'created': 'created_at_sort_index',
-                //                    'updated': 'updated_at_sort_index'
-                //                };
-                //
-                //                let params = {};
-                //
-                //                if (!requester) {
-                //                    params = {
-                //                        TableName: 'hg_games',
-                //                        ScanIndexForward: order === 'asc',
-                //                        IndexName: indexMap[sort] || indexMap['name'],
-                //                        KeyConditionExpression: '#dummy = :dummy',
-                //                        ExpressionAttributeNames: {
-                //                            '#dummy': 'dummy'
-                //                        },
-                //                        ExpressionAttributeValues: {
-                //                            ':dummy': 'dummy'
-                //                        }
-                //                    };
-                //                } else {
-                //                    params = {
-                //                        TableName: 'hg_games',
-                //                        ScanIndexForward: order === 'asc',
-                //                        KeyConditionExpression: '#devId= :devId',
-                //                        ExpressionAttributeNames: {
-                //                            '#devId': 'developer_id'
-                //                        },
-                //                        ExpressionAttributeValues: {
-                //                            ':devId': requester 
-                //                        }
-                //                    };
-                //                }
-                //
-                //                client.query(params, (err, data) => {
-                //                    if (err) {
-                //                        res.end(err.toString());
-                //                    } else {
-                //                        res.writeHead(200, {
-                //                            'Content-Type': 'application/json'
-                //                        });
-                //
-                //                        res.end(JSON.stringify({
-                //                            games: data.Items.map(g => {
-                //                                return {
-                //                                    created: g.created_at,
-                //                                    updated: g.updated_at,
-                //                                    id: g.game_id,
-                //                                    submitted_by: g.developer_id,
-                //                                    name: g.game_name,
-                //                                    description: g.description,
-                //                                    thumbnail: g.thumbnail
-                //                                }
-                //                            })
-                //                        }));
-                //                    }
-                //      });
             }
         } else {
             res.end('ok');
-        } 
+        }
     } else if (req.method === 'POST') {
         const gamePublishRegex = new RegExp('/games/(\\S*)/publish');
         const gameUpdateRegex = new RegExp('/games/(\\S*)/update');
@@ -1064,11 +1083,15 @@ const server = http.createServer((req, res) => {
             } else {
                 verifyAccessToken(username, token).then(() => {
                     const form = new multiparty.Form();
- 
+
                     getReqBody(req, (_data) => {
                         const data = JSON.parse(_data);
-                        const client = new aws.DynamoDB({region: 'us-west-2'});
-                        const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+                        const client = new aws.DynamoDB({
+                            region: 'us-west-2'
+                        });
+                        const readClient = new aws.DynamoDB.DocumentClient({
+                            region: 'us-west-2'
+                        });
 
                         const _gameUpdateRegex = new RegExp('/games/(\\S*)/update');
                         const gameId = _gameUpdateRegex.exec(req.url)[1];
@@ -1079,7 +1102,9 @@ const server = http.createServer((req, res) => {
                         if (changed) {
                             getGame(gameId).then(game => {
                                 if (username != game.author) {
-                                    res.writeHead(400, {'Content-Type': 'text/plain'});
+                                    res.writeHead(400, {
+                                        'Content-Type': 'text/plain'
+                                    });
                                     res.end('You cannot modify a game that you didnt create');
                                 } else {
                                     const newVersion = '' + (Number(game.version) + 1);
@@ -1087,7 +1112,9 @@ const server = http.createServer((req, res) => {
                                         updateGame(username, gameId, game.name, data.description, newVersion).then((_game) => {
                                             // sigh. 
                                             setTimeout(() => {
-                                                res.writeHead(200, {'Content-Type': 'application/json'});
+                                                res.writeHead(200, {
+                                                    'Content-Type': 'application/json'
+                                                });
                                                 res.end(JSON.stringify(_game));
                                             }, 250);
                                         });
@@ -1099,7 +1126,9 @@ const server = http.createServer((req, res) => {
                                 res.end(err.toString());
                             });
                         } else {
-                            res.writeHead(400, {'Content-Type': 'text/plain'});
+                            res.writeHead(400, {
+                                'Content-Type': 'text/plain'
+                            });
                             res.end('No valid changes');
                         }
                     });
@@ -1113,7 +1142,7 @@ const server = http.createServer((req, res) => {
                 res.end('no');
             } else {
                 verifyAccessToken(username, token).then(() => {
- 
+
                     getReqBody(req, (_data) => {
                         const data = JSON.parse(_data);
                         if (!data.game_id || !data.tag) {
@@ -1122,7 +1151,9 @@ const server = http.createServer((req, res) => {
                             console.log("create a tag");
                             console.log(data);
                             tagGame(data.tag, data.game_id, username).then(() => {
-                                res.writeHead(200, {'Content-Type': 'application/json'});
+                                res.writeHead(200, {
+                                    'Content-Type': 'application/json'
+                                });
                                 res.end('nice');
                             }).catch(err => {
                                 console.log(err);
@@ -1141,12 +1172,16 @@ const server = http.createServer((req, res) => {
             } else {
                 verifyAccessToken(username, token).then(() => {
                     const form = new multiparty.Form();
- 
+
                     getReqBody(req, (_data) => {
                         const data = JSON.parse(_data);
                         console.log('want to publish game');
-                        const client = new aws.DynamoDB({region: 'us-west-2'});
-                        const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
+                        const client = new aws.DynamoDB({
+                            region: 'us-west-2'
+                        });
+                        const readClient = new aws.DynamoDB.DocumentClient({
+                            region: 'us-west-2'
+                        });
 
                         const _gamePublishRegex = new RegExp('/games/(\\S*)/publish');
                         const gameId = _gamePublishRegex.exec(req.url)[1];
@@ -1179,14 +1214,16 @@ const server = http.createServer((req, res) => {
                                     } else {
                                         newVersion = '' + (result.Items[0].version + 1);
                                     }
-                                } 
+                                }
 
                                 // hack
                                 if (!busted) {
 
                                     getBuild(data.owner, data.repo, data.commit).then((dir) => {
-                                        
-                                        const s3 = new aws.S3({region: 'us-west-2'});
+
+                                        const s3 = new aws.S3({
+                                            region: 'us-west-2'
+                                        });
                                         fs.readFile(dir.zipPath, (err, buf) => {
                                             console.log(err);
 
@@ -1200,15 +1237,19 @@ const server = http.createServer((req, res) => {
                                             s3.putObject(params, (err, s3Data) => {
                                                 console.log('data');
                                                 const updateGameLatest = () => new Promise((resolve, reject) => {
-                                
-                                                    getGame(gameId).then((_game) => { 
+
+                                                    getGame(gameId).then((_game) => {
                                                         console.log('GOT GAMEEEEE');
                                                         console.log(_game);
                                                         const _updateParams = {
                                                             TableName: 'hg_games',
                                                             Key: {
-                                                                'game_id': {S: gameId},
-                                                                'version': {S: _game.version}
+                                                                'game_id': {
+                                                                    S: gameId
+                                                                },
+                                                                'version': {
+                                                                    S: _game.version
+                                                                }
                                                             },
                                                             AttributeUpdates: {
                                                                 'status': {
@@ -1225,28 +1266,42 @@ const server = http.createServer((req, res) => {
                                                                 }
                                                             }
                                                         };
-            
-            
+
+
                                                         ddb.updateItem(updateParams, (err, putResult) => {
                                                             if (!err) {
                                                                 ddb.updateItem(reqUpdateParams, (err, putResult2) => {
                                                                     if (!err) {
 
                                                                         const _location = `https://hg-games.s3-us-west-2.amazonaws.com/${gameId}/${data.commit}.zip`;
-            
+
                                                                         const params = {
                                                                             TableName: 'hg_game_versions',
                                                                             Item: {
-                                                                                'game_id': {S: gameId},
-                                                                                'version': {N: newVersion},
-                                                                                'created': {N: '' + Date.now()},
-                                                                                'submitted_by': {S: 'todo'},
-                                                                                'location': {S: _location},
-                                                                                'commit': {S: data.commit},
-                                                                                'status': {S: 'created'}
+                                                                                'game_id': {
+                                                                                    S: gameId
+                                                                                },
+                                                                                'version': {
+                                                                                    N: newVersion
+                                                                                },
+                                                                                'created': {
+                                                                                    N: '' + Date.now()
+                                                                                },
+                                                                                'submitted_by': {
+                                                                                    S: 'todo'
+                                                                                },
+                                                                                'location': {
+                                                                                    S: _location
+                                                                                },
+                                                                                'commit': {
+                                                                                    S: data.commit
+                                                                                },
+                                                                                'status': {
+                                                                                    S: 'created'
+                                                                                }
                                                                             }
                                                                         };
-        
+
                                                                         client.putItem(params, (err, putResult) => {
                                                                             console.log(err);
                                                                             console.log(putResult);
@@ -1267,8 +1322,8 @@ const server = http.createServer((req, res) => {
                                                                                     });
                                                                                 });
                                                                             });
-                                                                        }); 
-        
+                                                                        });
+
                                                                     } else {
                                                                         console.log(err);
                                                                         res.end('hmmmmmm');
@@ -1306,23 +1361,23 @@ const server = http.createServer((req, res) => {
                         } else {
                             const fileValues = Object.values(files);
                             console.log(files);
-    
+
                             let hack = false;
-    
+
                             const uploadedFiles = fileValues[0].map(f => {
-    
+
                                 if (hack) {
                                     return;
                                 }
-    
+
                                 hack = true;
-    
+
                                 if (f.size > MAX_SIZE) {
                                     res.writeHead(400);
                                     res.end('File size exceeds ' + MAX_SIZE + ' bytes');
                                 } else {
                                     const assetId = getHash(uuidv4());
-    
+
                                     const username = req.headers['hg-username'];
                                     console.log('hello');
                                     console.log(username);
@@ -1330,27 +1385,29 @@ const server = http.createServer((req, res) => {
                                     createRecord(username, assetId, f.size, f.originalFilename, {
                                         'Content-Type': f.headers['content-type']
                                     }).then(() => {
-    
-                                        const childSession = fork(path.join(__dirname, 'upload.js'), 
+
+                                        const childSession = fork(path.join(__dirname, 'upload.js'),
                                             [
-                                                `--path=${f.path}`, 
-                                                `--developer=${username}`, 
-                                                `--id=${assetId}`, 
-                                                `--name=${f.originalFilename}`, 
-                                                `size=${f.size}`, 
+                                                `--path=${f.path}`,
+                                                `--developer=${username}`,
+                                                `--id=${assetId}`,
+                                                `--name=${f.originalFilename}`,
+                                                `size=${f.size}`,
                                                 `type=${f.headers['content-type']}`
                                             ]
                                         );
-                                        res.writeHead(200, {'Content-Type': 'application/json'});
+                                        res.writeHead(200, {
+                                            'Content-Type': 'application/json'
+                                        });
                                         res.end(JSON.stringify({
                                             assetId
                                         }));
-    
+
                                     });
                                 }
                             });
                         }
-    
+
                     });
                 }).catch((err) => {
                     console.log(err);
@@ -1369,9 +1426,11 @@ const server = http.createServer((req, res) => {
                     getReqBody(req, (_data) => {
                         console.log('sdd');
                         const data = JSON.parse(_data);
-        
-                        const readClient = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
-        
+
+                        const readClient = new aws.DynamoDB.DocumentClient({
+                            region: 'us-west-2'
+                        });
+
                         const params = {
                             TableName: 'hg_games',
                             IndexName: 'dev_game_name_index',
@@ -1385,13 +1444,15 @@ const server = http.createServer((req, res) => {
                                 ':gameName': data.game_name
                             }
                         };
-        
+
                         readClient.query(params, (err, result) => {
                             if (err) {
                                 res.end(err.toString());
                             } else {
                                 if (result.Items.length) {
-                                    res.writeHead(400, {'Content-Type': 'text/plain'});
+                                    res.writeHead(400, {
+                                        'Content-Type': 'text/plain'
+                                    });
                                     res.end('that already exists');
                                 } else {
                                     const gameId = generateGameId();
@@ -1400,42 +1461,75 @@ const server = http.createServer((req, res) => {
                                     console.log('wat');
                                     const params = {
                                         RequestItems: {
-                                            'hg_games': [
-                                                {
+                                            'hg_games': [{
                                                     PutRequest: {
                                                         Item: {
-                                                            'game_composite': {S: `latest:${gameId}`},
-                                                            'game_id': {S: gameId},
-                                                            'developer_id': {S: username},
-                                                            'game_name': {S: data.game_name},
-                                                            'created': {N: nowString},
-                                                            'version': {N: '1'},
-                                                            'updated': {N: nowString},
-                                                            'description': {S: descriptionString}
+                                                            'game_composite': {
+                                                                S: `latest:${gameId}`
+                                                            },
+                                                            'game_id': {
+                                                                S: gameId
+                                                            },
+                                                            'developer_id': {
+                                                                S: username
+                                                            },
+                                                            'game_name': {
+                                                                S: data.game_name
+                                                            },
+                                                            'created': {
+                                                                N: nowString
+                                                            },
+                                                            'version': {
+                                                                N: '1'
+                                                            },
+                                                            'updated': {
+                                                                N: nowString
+                                                            },
+                                                            'description': {
+                                                                S: descriptionString
+                                                            }
                                                         }
                                                     }
                                                 },
                                                 {
                                                     PutRequest: {
                                                         Item: {
-                                                            'game_composite': {S: `${gameId}:1`},
-                                                            'game_id': {S: gameId},
-                                                            'developer_id': {S: username},
-                                                            'game_name': {S: data.game_name},
-                                                            'created': {N: nowString},
-                                                            'version': {N: '1'},
-                                                            'updated': {N: nowString},
-                                                            'description': {S: descriptionString}
+                                                            'game_composite': {
+                                                                S: `${gameId}:1`
+                                                            },
+                                                            'game_id': {
+                                                                S: gameId
+                                                            },
+                                                            'developer_id': {
+                                                                S: username
+                                                            },
+                                                            'game_name': {
+                                                                S: data.game_name
+                                                            },
+                                                            'created': {
+                                                                N: nowString
+                                                            },
+                                                            'version': {
+                                                                N: '1'
+                                                            },
+                                                            'updated': {
+                                                                N: nowString
+                                                            },
+                                                            'description': {
+                                                                S: descriptionString
+                                                            }
                                                         }
                                                     }
                                                 }
                                             ]
                                         }
                                     };
-        
-                                    const client = new aws.DynamoDB({region: 'us-west-2'});
+
+                                    const client = new aws.DynamoDB({
+                                        region: 'us-west-2'
+                                    });
                                     client.batchWriteItem(params, (err, putResult) => {
-        
+
                                         console.log(err);
                                         console.log(putResult);
 
@@ -1463,5 +1557,5 @@ const server = http.createServer((req, res) => {
         res.end('not found');
     }
 });
-    
+
 server.listen(80);
