@@ -22,8 +22,9 @@ const {
     verifyAccessToken
 } = require('homegames-common');
 
+
 const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
-    const __data = JSON.stringify({
+    const _data = {
         aggs: {
             tags: {
                 terms: {
@@ -32,10 +33,10 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
             }
         }
 
-    });
+    };
 
     if (__gameId) {
-        __data.query = {
+        _data.query = {
             term: {
                 'game_id': {
                     value: __gameId
@@ -43,7 +44,7 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
             }
         };
     } else if (__userId) {
-        __data.query = {
+        _data.query = {
             term: {
                 'user_id': {
                     value: __userId
@@ -51,6 +52,10 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
             }
         }
     }
+    const __data = JSON.stringify(_data);
+
+    console.log("TAG QUERY");
+    console.log(__data);
 
     const __options = {
         hostname: ELASTIC_SEARCH_HOST,
