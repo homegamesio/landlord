@@ -7,7 +7,6 @@ const fs = require('fs');
 const aws = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
-const Magic = require('mmmagic').Magic;
 const util = require('util');
 const { parse } = require('querystring');
 const multiparty = require('multiparty');
