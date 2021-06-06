@@ -1060,7 +1060,7 @@ const server = http.createServer((req, res) => {
                     }));
                 });
             } else {
-                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags.split(',')).then(d => {
+                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags ? tags.split(',') : []).then(d => {
                     console.log('GAMES');
                     console.log(d);
                     res.end(JSON.stringify({
