@@ -282,6 +282,33 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
 
 });
 
+const tagGame = (tagId, gameId, userId) => new Promise((resolve, reject) => {
+    if (tagId.length == 0 || tagId.length  > 20) {
+        reject('tag must be between 1-20 characters');
+    }
+    const client = new aws.DynamoDB({region: 'us-west-2'});
+    const params = {
+        TableName: 'hg_tags',
+        Item: {
+            'user_id': {S: userId},
+            'tag': {S: `${userId}:${tagId}`},
+            'tag_id': {S: tagId.split(' ')[0]},
+            'game_id': {S: gameId},
+            'created': {N: `${Date.now()}`}
+        }
+    };
+
+    client.putItem(params, (err, putResult) => {
+        if (!err) {
+            resolve();
+        } else {
+            reject(err);
+        }
+    });
+
+});
+
+
 const createRecord = (developerId, assetId, size, name, metadata) => new Promise((resolve, reject) => {
     const client = new aws.DynamoDB({region: 'us-west-2'});
     console.log('creating with');
@@ -465,7 +492,7 @@ const doSearch = (searchQuery) => new Promise((resolve, reject) => {
 
 const DEFAULT_GAME_ORDER = {'game_name': {order: 'asc'}};
 
-const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null) => new Promise((resolve, reject) => {
+const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
 
     const _data = {
         from: offset,
@@ -477,6 +504,10 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
         },
         sort
     };
+
+
+    console.log("I GOT TAGS");
+    console.log(tags);
 
     if (query) {
         _data.query.query_string = query;
@@ -767,7 +798,8 @@ const server = http.createServer((req, res) => {
             const queryObject = url.parse(req.url,true).query;
 
             const searchQuery = queryObject.query;
-            
+            const tags = queryObject.tags;
+
             const requester = req.headers['hg-username'];
                             
             if (queryObject.author) {
@@ -807,7 +839,7 @@ const server = http.createServer((req, res) => {
                 //                      res.end(JSON.stringify({games: d}));
                 //          });
             } else {
-                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery).then(d => {
+                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags).then(d => {
                     console.log('GAMES');
                     console.log(d);
                     res.end(JSON.stringify({games: d}));
@@ -928,6 +960,33 @@ const server = http.createServer((req, res) => {
                         } else {
                             res.writeHead(400, {'Content-Type': 'text/plain'});
                             res.end('No valid changes');
+                        }
+                    });
+                });
+            }
+        } else if (req.url == '/tags') {
+            const username = req.headers['hg-username'];
+            const token = req.headers['hg-token'];
+
+            if (!username || !token) {
+                res.end('no');
+            } else {
+                verifyAccessToken(username, token).then(() => {
+ 
+                    getReqBody(req, (_data) => {
+                        const data = JSON.parse(_data);
+                        if (!data.game_id || !data.tag) {
+                            res.end('request requires game id & tag');
+                        } else {
+                            console.log("create a tag");
+                            console.log(data);
+                            tagGame(data.tag, data.game_id, username).then(() => {
+                                res.writeHead(200, {'Content-Type': 'application/json'});
+                                res.end('nice');
+                            }).catch(err => {
+                                console.log(err);
+                                res.end('something went wrong');
+                            });
                         }
                     });
                 });
