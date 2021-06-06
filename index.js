@@ -496,65 +496,169 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
 
     const _data = {
         from: offset,
-        size: limit,
-        query: {
+        size: limit
+    };
+
+    console.log('I GOT TAGS');
+    console.log(tags);
+
+    let data, options;
+
+    if (tags.length > 0) {
+        _data.query = {
+            terms: {
+                tag_id: tags
+            }
+        };
+
+        data = JSON.stringify(_data);
+
+        options = {
+            hostname: ELASTIC_SEARCH_HOST,
+            port: 443,
+            path: '/tag-index/_search',
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': data.length
+            }
+        };
+
+        // this is terrible
+        
+        let gameIds = [];
+
+        const req = https.request(options, _res => {
+            let _buf = '';
+            _res.on('data', d => {
+                _buf += d;
+            });
+    
+            _res.on('end', () => {
+                const buf = JSON.parse(_buf);
+                console.log('tag response');
+                console.log(buf);
+                if (buf.hits && buf.hits.hits) {
+                    gameIds = buf.hits.hits.map(hit => hit._source);
+                }
+
+                const gameQuery = {
+                    query: {
+                        bool: {
+                            must: [
+                                {
+                                    exists: {
+                                        field: 'latest_approved_version'
+                                    },
+                                },
+                                {
+                                    terms: {
+                                        game_id: gameIds
+                                    }
+                                },
+                            ]
+                        }
+                    },
+                    sort
+                };
+
+                const gameReq = JSON.stringify(gameQuery);
+
+                const gameOptions = {
+                    hostname: ELASTIC_SEARCH_HOST,
+                    port: 443,
+                    path: '/lambda-index/_search',
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': gameReq.length
+                    }
+                };
+    
+                const req2 = https.request(gameOptions, _res2 => {
+                    let _buf2 = '';
+                    _res2.on('data', d2 => {
+                        _buf2 += d2;
+                    });
+        
+                    _res2.on('end', () => {
+                        const buf2 = JSON.parse(_buf2);
+                        console.log('games from tags giigig');
+                        console.log(buf2);
+                        let gameList = [];
+                        if (buf2.hits && buf2.hits.total.value > 0) {
+                            console.log('I know I have games');
+                            console.log(buf2.hits.hits);
+                            gameList = buf2.hits.hits.map(hit => mapGame(hit._source));
+                        }
+        
+                        resolve(gameList);
+                    });
+                });
+
+                req2.write(gameReq);
+                req2.end();
+
+            });
+    
+        });
+    
+        req.write(data);
+    
+        req.end();
+
+    } else {
+        _data.query = {
             exists: {
                 field: 'latest_approved_version'
             }
-        },
-        sort
-    };
-
-
-    console.log("I GOT TAGS");
-    console.log(tags);
-
-    if (query) {
-        _data.query.query_string = query;
-    }
-
-    const data = JSON.stringify(_data);
-
-    const options = {
-        hostname: ELASTIC_SEARCH_HOST,
-        port: 443,
-        path: '/lambda-index/_search',
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': data.length
+        };
+        
+        _data.sort = sort;
+ 
+        if (query) {
+            _data.query.query_string = query;
         }
-    };
 
-    console.log('REQUEST IS');
-    console.log(data);
-
-    const req = https.request(options, _res => {
-        let _buf = '';
-        _res.on('data', d => {
-            _buf += d;
-        });
-
-        _res.on('end', () => {
-            const buf = JSON.parse(_buf);
-            console.log('giigig');
-            console.log(buf);
-            let gameList = [];
-            if (buf.hits && buf.hits.total.value > 0) {
-                console.log('I know I have games');
-                console.log(buf.hits.hits);
-                gameList = buf.hits.hits.map(hit => mapGame(hit._source));
+        data = JSON.stringify(_data);
+    
+        options = {
+            hostname: ELASTIC_SEARCH_HOST,
+            port: 443,
+            path: '/lambda-index/_search',
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': data.length
             }
+        };
 
-            resolve(gameList);
+        const req = https.request(options, _res => {
+            let _buf = '';
+            _res.on('data', d => {
+                _buf += d;
+            });
+    
+            _res.on('end', () => {
+                const buf = JSON.parse(_buf);
+                console.log('giigig');
+                console.log(buf);
+                let gameList = [];
+                if (buf.hits && buf.hits.total.value > 0) {
+                    console.log('I know I have games');
+                    console.log(buf.hits.hits);
+                    gameList = buf.hits.hits.map(hit => mapGame(hit._source));
+                }
+    
+                resolve(gameList);
+            });
+    
         });
-
-    });
-
-    req.write(data);
-
-    req.end();
-
+    
+        req.write(data);
+    
+        req.end();
+    }
 });
 
 const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) => {
@@ -839,7 +943,7 @@ const server = http.createServer((req, res) => {
                 //                      res.end(JSON.stringify({games: d}));
                 //          });
             } else {
-                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags).then(d => {
+                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags.split(',')).then(d => {
                     console.log('GAMES');
                     console.log(d);
                     res.end(JSON.stringify({games: d}));
@@ -978,7 +1082,7 @@ const server = http.createServer((req, res) => {
                         if (!data.game_id || !data.tag) {
                             res.end('request requires game id & tag');
                         } else {
-                            console.log("create a tag");
+                            console.log('create a tag');
                             console.log(data);
                             tagGame(data.tag, data.game_id, username).then(() => {
                                 res.writeHead(200, {'Content-Type': 'application/json'});
