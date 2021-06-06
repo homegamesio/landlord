@@ -499,16 +499,16 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
         size: limit
     };
 
-    console.log('I GOT TAGS');
+    console.log("I GOT TAGS");
     console.log(tags);
 
     let data, options;
 
     if (tags.length > 0) {
         _data.query = {
-            terms: {
-                tag_id: tags
-            }
+        terms: {
+            tag_id: tags
+        }
         };
 
         data = JSON.stringify(_data);
@@ -526,7 +526,7 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
 
         // this is terrible
         
-        let gameIds = [];
+    let gameIds = [];
 
         const req = https.request(options, _res => {
             let _buf = '';
@@ -538,66 +538,66 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
                 const buf = JSON.parse(_buf);
                 console.log('tag response');
                 console.log(buf);
-                if (buf.hits && buf.hits.hits) {
-                    gameIds = buf.hits.hits.map(hit => hit._source);
+        if (buf.hits && buf.hits.hits) {
+                gameIds = buf.hits.hits.map(hit => hit._source);
+        }
+
+        const gameQuery = {
+            query: {
+                bool: {
+                    must: [
+                        {
+                            exists: {
+                                field: 'latest_approved_version'
+                            },
+                        },
+                        {
+                            terms: {
+                                game_id: gameIds
+                            }
+                        },
+                    ]
                 }
+            },
+            sort
+        };
 
-                const gameQuery = {
-                    query: {
-                        bool: {
-                            must: [
-                                {
-                                    exists: {
-                                        field: 'latest_approved_version'
-                                    },
-                                },
-                                {
-                                    terms: {
-                                        game_id: gameIds
-                                    }
-                                },
-                            ]
-                        }
-                    },
-                    sort
-                };
+        const gameReq = JSON.stringify(gameQuery);
 
-                const gameReq = JSON.stringify(gameQuery);
-
-                const gameOptions = {
-                    hostname: ELASTIC_SEARCH_HOST,
-                    port: 443,
-                    path: '/lambda-index/_search',
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Content-Length': gameReq.length
-                    }
-                };
+            const gameOptions = {
+                hostname: ELASTIC_SEARCH_HOST,
+                port: 443,
+                path: '/lambda-index/_search',
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': gameReq.length
+                }
+            };
     
-                const req2 = https.request(gameOptions, _res2 => {
-                    let _buf2 = '';
-                    _res2.on('data', d2 => {
-                        _buf2 += d2;
-                    });
-        
-                    _res2.on('end', () => {
-                        const buf2 = JSON.parse(_buf2);
-                        console.log('games from tags giigig');
-                        console.log(buf2);
-                        let gameList = [];
-                        if (buf2.hits && buf2.hits.total.value > 0) {
-                            console.log('I know I have games');
-                            console.log(buf2.hits.hits);
-                            gameList = buf2.hits.hits.map(hit => mapGame(hit._source));
-                        }
-        
-                        resolve(gameList);
-                    });
+            const req2 = https.request(gameOptions, _res2 => {
+                let _buf2 = '';
+                _res2.on('data', d2 => {
+                    _buf2 += d2;
                 });
+        
+                _res2.on('end', () => {
+                    const buf2 = JSON.parse(_buf2);
+                    console.log('games from tags giigig');
+                    console.log(buf2);
+                    let gameList = [];
+                    if (buf2.hits && buf2.hits.total.value > 0) {
+                        console.log('I know I have games');
+                        console.log(buf2.hits.hits);
+                        gameList = buf2.hits.hits.map(hit => mapGame(hit._source));
+                    }
+        
+                    resolve(gameList);
+            });
+        });
 
-                req2.write(gameReq);
-                req2.end();
+        req2.write(gameReq);
+        req2.end();
 
             });
     
@@ -614,7 +614,7 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
             }
         };
         
-        _data.sort = sort;
+    _data.sort = sort;
  
         if (query) {
             _data.query.query_string = query;
@@ -1082,7 +1082,7 @@ const server = http.createServer((req, res) => {
                         if (!data.game_id || !data.tag) {
                             res.end('request requires game id & tag');
                         } else {
-                            console.log('create a tag');
+                            console.log("create a tag");
                             console.log(data);
                             tagGame(data.tag, data.game_id, username).then(() => {
                                 res.writeHead(200, {'Content-Type': 'application/json'});
