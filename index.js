@@ -33,15 +33,15 @@ const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reje
                     path: dir + '/' + files[0],
                     zipPath: dir + 'out.zip'
                 });
-	    });
+            });
         });
-	
+    
         const stream = _response.pipe(unzipper.Extract({ path: dir }));
 
         stream.on('finish', () => {
             archive.directory(dir, false);
             archive.finalize();
-	});
+        });
 
         archive.pipe(output);
     });
@@ -99,7 +99,7 @@ const getGame = (gameId, version = null) => new Promise((resolve, reject) => {
         const params = {
             TableName: 'hg_games',
             Key: {
-                "game_id": {
+                'game_id': {
                     S: gameId
                 }
             }
@@ -138,9 +138,13 @@ const getGame = (gameId, version = null) => new Promise((resolve, reject) => {
             } else {
                 if (results.Items.length) {
                     console.log(results.Items);
-                    resolve(mapGame(results.Items[0]));
+                    console.log('about to map');
+                    const mapped = mapGame(results.Items[0]);
+                    console.log('mapped');
+                    console.log(mapped);
+                    resolve(mapped);//Game(results.Items[0]));
                 } else {
-                        reject("No results");
+                    reject('No results');
                 }
             }
         });
@@ -151,11 +155,12 @@ const mapGame = (dynamoRecord) => {
     return {
         name: dynamoRecord.game_name && dynamoRecord.game_name.S || dynamoRecord.game_name,
         created: dynamoRecord.created && dynamoRecord.created.N || dynamoRecord.created,
-        author: dynamoRecord.developer_id && dynamoRecord.developer_id.S || dynamoRecord.developer_id,
+        author: dynamoRecord.developer_id && dynamoRecord.developer_id.S || dynamoRecord.developer_id || dynamoRecord.author,
         id: dynamoRecord.game_id && dynamoRecord.game_id.S || dynamoRecord.game_id,
         version: dynamoRecord.version && dynamoRecord.version.N || dynamoRecord.version,
-        description: dynamoRecord.description && dynamoRecord.description.S || dynamoRecord.description
-    }
+        description: dynamoRecord.description && dynamoRecord.description.S || dynamoRecord.description,
+        latest_approved_version: dynamoRecord.latest_approved_version && dynamoRecord.latest_approved_version.N || dynamoRecord.latest_approved_version
+    };
 };
 
 const updateGame = (developerId, gameId, gameName, description, newVersion) => new Promise((resolve, reject) => {
@@ -165,24 +170,66 @@ const updateGame = (developerId, gameId, gameName, description, newVersion) => n
 
         const nowString = '' + Date.now();
         const descriptionString = '' + description;
-
         const params = {
-            TableName: 'hg_games',
-            Item: {
-                'game_id': {S: gameId},
-                'developer_id': {S: developerId},
-                'game_name': {S: gameName},
-                'created': {N: nowString},
-                'version': {N: newVersion},
-                'updated': {N: nowString},
-                'description': {S: descriptionString}
+            RequestItems: {
+                'hg_games': [
+                    {
+                        PutRequest: {
+                            Item: {
+                                'game_composite': {S: `latest:${gameId}`},
+                                'game_id': {S: gameId},
+                                'developer_id': {S: developerId},
+                                'game_name': {S: gameName},
+                                'created': {N: nowString},
+                                'version': {N: newVersion},
+                                'updated': {N: nowString},
+                                'description': {S: descriptionString}
+                            }
+                        }
+                    },
+                    {
+                        PutRequest: {
+                            Item: {
+                                'game_composite': {S: `${gameId}:${newVersion}`},
+                                'game_id': {S: gameId},
+                                'developer_id': {S: developer},
+                                'game_name': {S: gameName},
+                                'created': {N: nowString},
+                                'version': {N: newVersion},
+                                'updated': {N: nowString},
+                                'description': {S: descriptionString}
+                            }
+                        }
+                    }
+                ]
             }
         };
         
-        ddb.putItem(params, (err, putResult) => {
+        const client = new aws.DynamoDB({region: 'us-west-2'});
+        client.batchWriteItem(params, (err, putResult) => {
+ 
+
+            //        const params = {
+            //            TableName: 'hg_games',
+            //            Item: {
+            //                'game_id': {S: gameId},
+            //                'developer_id': {S: developerId},
+            //                'game_name': {S: gameName},
+            //                'created': {N: nowString},
+            //                'version': {N: newVersion},
+            //                'updated': {N: nowString},
+            //                'description': {S: descriptionString}
+            //            }
+            //        };
+            //
+            //  console.log('params');
+            //      console.log(params);
+            //        
+            //        ddb.putItem(params, (err, putResult) => {
             if (!err) {
                 resolve(mapGame(params.Item));
             } else {
+                console.log(err);
                 reject();
             }
         });
@@ -219,17 +266,17 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
                     'developerId': i.developer_id.S,
                     'size': Number(i.size.N),
                     'assetId': i.asset_id.S,
-                    'created': Number(i.created.N),
+                    'created': Number(i.created_at.N),
                     'status': i['status'].S,
                     'type': JSON.parse(i['metadata'].S)['Content-Type'],
                     'name': i.name && i.name.S || 'No name available'
                 };
             });
             resolve(res);
-//            resolve();
+            //            resolve();
         } else {
             console.log(err);
-  //          reject(err);
+            //          reject(err);
         }
     });
 
@@ -262,12 +309,8 @@ const createRecord = (developerId, assetId, size, name, metadata) => new Promise
 
 });
 
-const GITHUB_USER = '';
-const GITHUB_KEY = '';
-const ELASTIC_SEARCH_HOST = '';
-
 const getOwnerEmail = (owner) => new Promise((resolve, reject) => {
-     const _headers = {
+    const _headers = {
         'User-Agent': 'HomegamesLandlord/0.1.0',
         'Authorization': 'Basic ' + Buffer.from(`${GITHUB_USER}:${GITHUB_KEY}`).toString('base64')
     };
@@ -361,16 +404,40 @@ const testGame = (game) => new Promise((resolve, reject) => {
 const doSearch = (searchQuery) => new Promise((resolve, reject) => {
     const data = JSON.stringify({
         query: {
-            query_string: {
-                query: searchQuery
+            multi_match: {
+                fields: ['game_name', 'author', 'description'],
+                query: searchQuery,
+                fuzziness: 'AUTO'
             }
+            //    query_string: {
+            //      {
+            //          query: searchQuery
+            //      }
+            //    },
+            //            match: {
+            //      game_name: {
+            //                  query: searchQuery,
+            //        fuzziness: "AUTO"
+            //      },
+            //      author: {
+            //                  query: searchQuery,
+            //        fuzziness: "AUTO"
+            //      },
+            //          description: {
+            //                  query: searchQuery,
+            //        fuzziness: "AUTO"
+            //      } 
+            //            },
+            //            exists: {
+            //              field: 'latest_approved_version'
+            //      }
         }
     });
 
     const options = {
         hostname: ELASTIC_SEARCH_HOST,
         port: 443,
-        path: '/lambda-index/_search?pretty',
+        path: '/lambda-index/_search',
         method: 'GET',
         headers: {
             'Content-Type': 'application/json',
@@ -380,8 +447,15 @@ const doSearch = (searchQuery) => new Promise((resolve, reject) => {
 
     const req = https.request(options, _res => {
         _res.on('data', d => {
-            resolve(JSON.parse(d));
-       });
+            const buf = JSON.parse(d);
+            if (buf.hits && buf.hits.total.value > 0) {
+                const results = buf.hits.hits.map(hit => mapGame(hit._source));
+                resolve(results);
+            } else {
+                resolve();
+            }
+    
+        });
     });
 
     req.write(data);
@@ -394,17 +468,18 @@ const DEFAULT_GAME_ORDER = {'game_name': {order: 'asc'}};
 const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null) => new Promise((resolve, reject) => {
 
     const _data = {
-	from: offset,
-	size: limit,
-	sort
+        from: offset,
+        size: limit,
+        query: {
+            exists: {
+                field: 'latest_approved_version'
+            }
+        },
+        sort
     };
 
     if (query) {
-	_data.query = {
-		query_string: {
-			query
-		}
-	}
+        _data.query.query_string = query;
     }
 
     const data = JSON.stringify(_data);
@@ -412,7 +487,7 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
     const options = {
         hostname: ELASTIC_SEARCH_HOST,
         port: 443,
-        path: '/lambda-index/_search?pretty',
+        path: '/lambda-index/_search',
         method: 'GET',
         headers: {
             'Content-Type': 'application/json',
@@ -420,10 +495,29 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
         }
     };
 
+    console.log('REQUEST IS');
+    console.log(data);
+
     const req = https.request(options, _res => {
+        let _buf = '';
         _res.on('data', d => {
-            resolve(JSON.parse(d));
-       });
+            _buf += d;
+        });
+
+        _res.on('end', () => {
+            const buf = JSON.parse(_buf);
+            console.log('giigig');
+            console.log(buf);
+            let gameList = [];
+            if (buf.hits && buf.hits.total.value > 0) {
+                console.log('I know I have games');
+                console.log(buf.hits.hits);
+                gameList = buf.hits.hits.map(hit => mapGame(hit._source));
+            }
+
+            resolve(gameList);
+        });
+
     });
 
     req.write(data);
@@ -445,14 +539,14 @@ const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) =
             });
             // todo: this
             //const sourceNodeModules = 'INSERTHERE';
-//            fs.symlink(sourceNodeModules, dir + '/node_modules', 'dir', (err) => {
-//                if (!err) {
-//                    const _game = require(dir);
-//                    resolve(_game);
-//                } else {
-//                    reject(err);
-//                }
-//            });
+            //            fs.symlink(sourceNodeModules, dir + '/node_modules', 'dir', (err) => {
+            //                if (!err) {
+            //                    const _game = require(dir);
+            //                    resolve(_game);
+            //                } else {
+            //                    reject(err);
+            //                }
+            //            });
         });
     
     });
@@ -602,15 +696,72 @@ const server = http.createServer((req, res) => {
                         commit: i.commit,
                         'status': i.status,
                         'location': i.location
-                    }
+                    };
                 });
 
-                res.writeHead(200, {
-                    'Content-Type': 'application/json'
+                const getTags = (__gameId) => new Promise((__resolve, __reject) => {
+                    const __data = JSON.stringify({
+                        query: {
+                            term: {
+                                'game_id': {
+                                    value: __gameId
+                                }
+                            }
+                        },
+                        aggs: {
+                            tags: {
+                                terms: {
+                                    field: 'tag_id'
+                                }
+                            }
+                        }
+                
+                    });
+            
+                    const __options = {
+                        hostname: ELASTIC_SEARCH_HOST,
+                        port: 443,
+                        path: '/tag-index/_search?size=0',
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Content-Length': __data.length
+                        }
+                    };
+            
+                    const __req = https.request(__options, __res => {
+                        __res.on('data', __d => {
+                            const __buf = JSON.parse(__d);
+                            console.log(__buf);
+                            if (__buf.aggregations && __buf.aggregations.tags.buckets.length > 0) {
+                                const __results = __buf.aggregations.tags.buckets.map(item => item.key);//mapGame(hit._source));
+                                __resolve(__results);
+                            } else {
+                                __resolve([]);
+                            }
+                
+                        });
+                    });
+            
+                    __req.write(__data);
+            
+                    __req.end();
                 });
-                res.end(JSON.stringify({ versions: results }));
+
+
+        
+
+                getTags(gameId).then(tags => {
+
+                    console.log('GGGG TAGS');
+                    console.log(tags);
+                    res.writeHead(200, {
+                        'Content-Type': 'application/json'
+                    });
+                    res.end(JSON.stringify({ tags, versions: results }));
+                });
+
             });
-
         } else if (req.url.startsWith('/games')) {
             const client = new aws.DynamoDB.DocumentClient({region: 'us-west-2'});
             const queryObject = url.parse(req.url,true).query;
@@ -620,102 +771,114 @@ const server = http.createServer((req, res) => {
             const requester = req.headers['hg-username'];
                             
             if (queryObject.author) {
-                console.log("want games for just author");
+                console.log('want games for just author');
                 const queryParams = {
                     TableName: 'hg_games',
                     ScanIndexForward: false,
-                    IndexName: 'dev_game_name_index',
-                    KeyConditionExpression: '#developer_id = :developer_id',
+                    KeyConditionExpression: '#developer_id = :developer_id and begins_with(#game_composite, :latest)',
                     ExpressionAttributeNames: {
-                        '#developer_id': 'developer_id'
+                        '#developer_id': 'developer_id',
+                        '#game_composite': 'game_composite'
                     },
                     ExpressionAttributeValues: {
-                        ':developer_id': queryObject.author
+                        ':developer_id': queryObject.author,
+                        ':latest': 'latest'
                     }
                 };
 
                 client.query(queryParams, (err, data) => {
-                    const gameList = data.Items.map(mapGame);
-                    res.writeHead(200, {
-                        'Content-Type': 'application/json'
-                    });
+                    console.log(err);
+                    if (!err) {
+                        const gameList = data.Items.map(mapGame);
+                        res.writeHead(200, {
+                            'Content-Type': 'application/json'
+                        });
 
-                    res.end(JSON.stringify({games: gameList}));
+                        res.end(JSON.stringify({games: gameList}));
+                    } else {
+                        res.end({error: err});
+                    }
                 });
             } else if (searchQuery) {
                 doSearch(searchQuery).then(d => {
                     res.end(JSON.stringify({games: d}));
                 });
-//            	listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery).then(d => {
-//               	    res.end(JSON.stringify({games: d}));
-//	        });
+                //              listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery).then(d => {
+                //                      res.end(JSON.stringify({games: d}));
+                //          });
             } else {
+                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery).then(d => {
+                    console.log('GAMES');
+                    console.log(d);
+                    res.end(JSON.stringify({games: d}));
+                });
 
-                const sort = queryObject.sort || 'name';
-                const order = queryObject.order || 'asc';
 
-                const indexMap = {
-                    'name': 'game_name_sort_index',
-                    'created': 'created_at_sort_index',
-                    'updated': 'updated_at_sort_index'
-                };
-
-                let params = {};
-
-                if (!requester) {
-                    params = {
-                        TableName: 'hg_games',
-                        ScanIndexForward: order === 'asc',
-                        IndexName: indexMap[sort] || indexMap['name'],
-                        KeyConditionExpression: '#dummy = :dummy',
-                        ExpressionAttributeNames: {
-                            '#dummy': 'dummy'
-                        },
-                        ExpressionAttributeValues: {
-                            ':dummy': 'dummy'
-                        }
-                    };
-                } else {
-                    params = {
-                        TableName: 'hg_games',
-                        ScanIndexForward: order === 'asc',
-                        KeyConditionExpression: '#devId= :devId',
-                        ExpressionAttributeNames: {
-                            '#devId': 'developer_id'
-                        },
-                        ExpressionAttributeValues: {
-                            ':devId': requester 
-                        }
-                    };
-                }
-
-                client.query(params, (err, data) => {
-                    if (err) {
-                        res.end(err.toString());
-                    } else {
-                        res.writeHead(200, {
-                            'Content-Type': 'application/json'
-                        });
-
-                        res.end(JSON.stringify({
-                            games: data.Items.map(g => {
-                                return {
-                                    created: g.created_at,
-                                    updated: g.updated_at,
-                                    id: g.game_id,
-                                    submitted_by: g.developer_id,
-                                    name: g.game_name,
-                                    description: g.description,
-                                    thumbnail: g.thumbnail
-                                }
-                            })
-                        }));
-                    }
-		});
-	    }
-	} else {
-		res.end('ok');
-	} 
+                //                const sort = queryObject.sort || 'name';
+                //                const order = queryObject.order || 'asc';
+                //
+                //                const indexMap = {
+                //                    'name': 'game_name_sort_index',
+                //                    'created': 'created_at_sort_index',
+                //                    'updated': 'updated_at_sort_index'
+                //                };
+                //
+                //                let params = {};
+                //
+                //                if (!requester) {
+                //                    params = {
+                //                        TableName: 'hg_games',
+                //                        ScanIndexForward: order === 'asc',
+                //                        IndexName: indexMap[sort] || indexMap['name'],
+                //                        KeyConditionExpression: '#dummy = :dummy',
+                //                        ExpressionAttributeNames: {
+                //                            '#dummy': 'dummy'
+                //                        },
+                //                        ExpressionAttributeValues: {
+                //                            ':dummy': 'dummy'
+                //                        }
+                //                    };
+                //                } else {
+                //                    params = {
+                //                        TableName: 'hg_games',
+                //                        ScanIndexForward: order === 'asc',
+                //                        KeyConditionExpression: '#devId= :devId',
+                //                        ExpressionAttributeNames: {
+                //                            '#devId': 'developer_id'
+                //                        },
+                //                        ExpressionAttributeValues: {
+                //                            ':devId': requester 
+                //                        }
+                //                    };
+                //                }
+                //
+                //                client.query(params, (err, data) => {
+                //                    if (err) {
+                //                        res.end(err.toString());
+                //                    } else {
+                //                        res.writeHead(200, {
+                //                            'Content-Type': 'application/json'
+                //                        });
+                //
+                //                        res.end(JSON.stringify({
+                //                            games: data.Items.map(g => {
+                //                                return {
+                //                                    created: g.created_at,
+                //                                    updated: g.updated_at,
+                //                                    id: g.game_id,
+                //                                    submitted_by: g.developer_id,
+                //                                    name: g.game_name,
+                //                                    description: g.description,
+                //                                    thumbnail: g.thumbnail
+                //                                }
+                //                            })
+                //                        }));
+                //                    }
+                //      });
+            }
+        } else {
+            res.end('ok');
+        } 
     } else if (req.method === 'POST') {
         const gamePublishRegex = new RegExp('/games/(\\S*)/publish');
         const gameUpdateRegex = new RegExp('/games/(\\S*)/update');
@@ -736,7 +899,7 @@ const server = http.createServer((req, res) => {
 
                         const _gameUpdateRegex = new RegExp('/games/(\\S*)/update');
                         const gameId = _gameUpdateRegex.exec(req.url)[1];
-                        console.log("developer " + username + " wants to update " + gameId);
+                        console.log('developer ' + username + ' wants to update ' + gameId);
                         console.log(data);
                         const changed = data.description || data.thumbnail;
 
@@ -748,7 +911,7 @@ const server = http.createServer((req, res) => {
                                 } else {
                                     const newVersion = '' + (Number(game.version) + 1);
                                     if (data.description != game.description) {
-                                        updateGame(username, gameId, data.game_name, data.description, newVersion).then((_game) => {
+                                        updateGame(username, gameId, game.name, data.description, newVersion).then((_game) => {
                                             // sigh. 
                                             setTimeout(() => {
                                                 res.writeHead(200, {'Content-Type': 'application/json'});
@@ -836,46 +999,90 @@ const server = http.createServer((req, res) => {
 
                                             s3.putObject(params, (err, s3Data) => {
                                                 console.log('data');
-                                                console.log(s3Data);
+                                                const updateGameLatest = () => new Promise((resolve, reject) => {
+                                
+                                                    getGame(gameId).then((_game) => { 
+                                                        console.log('GOT GAMEEEEE');
+                                                        console.log(_game);
+                                                        const _updateParams = {
+                                                            TableName: 'hg_games',
+                                                            Key: {
+                                                                'game_id': {S: gameId},
+                                                                'version': {S: _game.version}
+                                                            },
+                                                            AttributeUpdates: {
+                                                                'status': {
+                                                                    Action: 'PUT',
+                                                                    Value: {
+                                                                        S: 'approved'
+                                                                    }
+                                                                },
+                                                                'approved_at': {
+                                                                    Action: 'PUT',
+                                                                    Value: {
+                                                                        N: '' + Date.now()
+                                                                    }
+                                                                }
+                                                            }
+                                                        };
+            
+            
+                                                        ddb.updateItem(updateParams, (err, putResult) => {
+                                                            if (!err) {
+                                                                ddb.updateItem(reqUpdateParams, (err, putResult2) => {
+                                                                    if (!err) {
 
-                                                const _location = `https://hg-games.s3-us-west-2.amazonaws.com/${gameId}/${data.commit}.zip`;
-
-                                                const params = {
-                                                    TableName: 'hg_game_versions',
-                                                    Item: {
-                                                        'game_id': {S: gameId},
-                                                        'version': {N: newVersion},
-                                                        'created': {N: '' + Date.now()},
-                                                        'submitted_by': {S: 'todo'},
-                                                        'location': {S: _location},
-                                                        'commit': {S: data.commit},
-                                                        'status': {S: 'created'}
-                                                    }
-                                                };
-
-                                                client.putItem(params, (err, putResult) => {
-                                                    console.log(err);
-                                                    console.log(putResult);
-                                                    getGameInstance(data.owner, data.repo, data.commit).then(game => {
-                                                        testGame(game).then(() => {
-                                                            console.log('emailing ' + data.owner);
-                                                            getOwnerEmail(data.owner).then(_email => {
-                                                                console.log(_email);
-                                                                createCode(_email, gameId, data.commit, newVersion).then((code) => {
-                                                                    console.log('created code');
-                                                                    emailOwner(data.owner, code, data.commit).then(() => {
-                                                                        res.end('emailed owner!');
-                                                                    }).catch(err => {
-                                                                        console.error(err);
-                                                                        res.end('error');
-                                                                    });
+                                                                        const _location = `https://hg-games.s3-us-west-2.amazonaws.com/${gameId}/${data.commit}.zip`;
+            
+                                                                        const params = {
+                                                                            TableName: 'hg_game_versions',
+                                                                            Item: {
+                                                                                'game_id': {S: gameId},
+                                                                                'version': {N: newVersion},
+                                                                                'created': {N: '' + Date.now()},
+                                                                                'submitted_by': {S: 'todo'},
+                                                                                'location': {S: _location},
+                                                                                'commit': {S: data.commit},
+                                                                                'status': {S: 'created'}
+                                                                            }
+                                                                        };
+        
+                                                                        client.putItem(params, (err, putResult) => {
+                                                                            console.log(err);
+                                                                            console.log(putResult);
+                                                                            getGameInstance(data.owner, data.repo, data.commit).then(game => {
+                                                                                testGame(game).then(() => {
+                                                                                    console.log('emailing ' + data.owner);
+                                                                                    getOwnerEmail(data.owner).then(_email => {
+                                                                                        console.log(_email);
+                                                                                        createCode(_email, gameId, data.commit, newVersion).then((code) => {
+                                                                                            console.log('created code');
+                                                                                            emailOwner(data.owner, code, data.commit).then(() => {
+                                                                                                res.end('emailed owner!');
+                                                                                            }).catch(err => {
+                                                                                                console.error(err);
+                                                                                                res.end('error');
+                                                                                            });
+                                                                                        });
+                                                                                    });
+                                                                                });
+                                                                            });
+                                                                        }); 
+        
+                                                                    } else {
+                                                                        console.log(err);
+                                                                        res.end('hmmmmmm');
+                                                                    }
                                                                 });
-                                                            });
+                                                            } else {
+                                                                console.log(err);
+                                                                res.end('hmmm');
+                                                            }
                                                         });
                                                     });
-                                                }); 
-                                            });
 
+                                                });
+                                            });
                                         });
                                     });
                                 }
@@ -937,7 +1144,7 @@ const server = http.createServer((req, res) => {
                                         res.writeHead(200, {'Content-Type': 'application/json'});
                                         res.end(JSON.stringify({
                                             assetId
-                                        }))
+                                        }));
     
                                     });
                                 }
@@ -992,20 +1199,42 @@ const server = http.createServer((req, res) => {
                                     const descriptionString = ('' + data.description) || 'No description provided';
                                     console.log('wat');
                                     const params = {
-                                        TableName: 'hg_games',
-                                        Item: {
-                                            'game_id': {S: gameId},
-                                            'developer_id': {S: username},
-                                            'game_name': {S: data.game_name},
-                                            'created': {N: nowString},
-                                            'version': {N: '1'},
-                                            'updated': {N: nowString},
-                                            'description': {S: descriptionString}
+                                        RequestItems: {
+                                            'hg_games': [
+                                                {
+                                                    PutRequest: {
+                                                        Item: {
+                                                            'game_composite': {S: `latest:${gameId}`},
+                                                            'game_id': {S: gameId},
+                                                            'developer_id': {S: username},
+                                                            'game_name': {S: data.game_name},
+                                                            'created': {N: nowString},
+                                                            'version': {N: '1'},
+                                                            'updated': {N: nowString},
+                                                            'description': {S: descriptionString}
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    PutRequest: {
+                                                        Item: {
+                                                            'game_composite': {S: `${gameId}:1`},
+                                                            'game_id': {S: gameId},
+                                                            'developer_id': {S: username},
+                                                            'game_name': {S: data.game_name},
+                                                            'created': {N: nowString},
+                                                            'version': {N: '1'},
+                                                            'updated': {N: nowString},
+                                                            'description': {S: descriptionString}
+                                                        }
+                                                    }
+                                                }
+                                            ]
                                         }
                                     };
         
                                     const client = new aws.DynamoDB({region: 'us-west-2'});
-                                    client.putItem(params, (err, putResult) => {
+                                    client.batchWriteItem(params, (err, putResult) => {
         
                                         console.log(err);
                                         console.log(putResult);
@@ -1014,8 +1243,9 @@ const server = http.createServer((req, res) => {
                                             res.writeHead(200, {
                                                 'Content-Type': 'application/json'
                                             });
-                                            res.end(JSON.stringify(mapGame(params.Item)));
+                                            res.end(JSON.stringify(mapGame(params.RequestItems.hg_games[0].PutRequest.Item)));
                                         } else {
+                                            console.log(err);
                                             res.end('error');
                                         }
                                     });
