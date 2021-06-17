@@ -22,8 +22,7 @@ const {
     verifyAccessToken
 } = require('homegames-common');
 
-
-const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
+const getTags = (__gameId, __userId, __query, offset = 0, limit = 10) => new Promise((__resolve, __reject) => {
     const _data = {
         aggs: {
             tags: {
@@ -31,8 +30,12 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
                     field: 'tag_id'
                 }
             }
-        }
+        },
+        from: offset,
+        size: limit
+    };
 
+ 
     };
 
     if (__gameId) {
@@ -51,7 +54,17 @@ const getTags = (__gameId, __userId) => new Promise((__resolve, __reject) => {
                 }
             }
         }
+    } else if (__query) {
+    _data.query = {
+        match: {
+            'tag_id': {
+                query: __query,
+                fuzziness: "AUTO"
+            }
+        }
+    };
     }
+    
     const __data = JSON.stringify(_data);
 
     console.log("TAG QUERY");
@@ -853,7 +866,8 @@ const server = http.createServer((req, res) => {
                     }
                 }
             } else {
-                getTags().then(tags => {
+            const tagQuery = queryObject.query;
+                getTags(null, null, tagQuery).then(tags => {
                     res.end(JSON.stringify({
                         tags
                     }));
