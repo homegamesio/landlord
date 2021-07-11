@@ -35,9 +35,6 @@ const getTags = (__gameId, __userId, __query, offset = 0, limit = 10) => new Pro
         size: limit
     };
 
- 
-    };
-
     if (__gameId) {
         _data.query = {
             term: {
