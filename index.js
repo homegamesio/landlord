@@ -22,6 +22,143 @@ const {
     verifyAccessToken
 } = require('homegames-common');
 
+const SourceType = {
+	GITHUB: "GITHUB"
+};
+
+const requestIdFromCode = (code) => new Promise((resolve, reject) => {
+	const ddb = new aws.DynamoDB({
+		region: 'us-west-2'
+	});
+
+	const codeParams = {
+		TableName: 'verification_requests',
+                IndexName: 'code-index',
+		Key: {
+			'code': {
+				S: code
+			}
+		}
+	};
+
+	ddb.getItem(codeParams, (err, data) => {
+		if (err) {
+			console.log(err);
+			reject();
+		} else {
+			const requestId = data.Item.publish_request_id.S;
+			resolve(request);
+		}
+	});
+
+});
+
+const getPublishRequestFromCode = (code) => new Promise((resolve, reject) => {
+	requestIdFromCode(code).then(requestId => {
+		const ddb = new aws.DynamoDB({
+			region: 'us-west-2'
+		});
+
+		const params = {
+			TableName: 'publish_requests',
+			IndexName: 'request_id-index',
+			Key: {
+				'request_id': {
+					S: requestId
+				}
+			}
+		};
+
+		ddb.getItem(params, (err, data) => {
+			if (err) {
+				console.log(err);
+				reject();
+			} else {
+				console.log("got request");
+				console.log(data.Item);
+				resolve();
+			}
+		});
+	});
+});
+
+const verifyCode = (code, requestId) => new Promise((resolve, reject) => {
+	console.log(`verifying code ${code} with request ${requestId}`);
+	const ddb = new aws.DynamoDB({
+		region: 'us-west-2'
+	});
+
+	const params = {
+		TableName: 'verification_requests',
+		Key: {
+			'publish_request_id': {
+				S: requestId
+			}
+		}
+	};
+
+	ddb.getItem(params, (err, data) => {
+		if (err) {
+			console.log(err);
+			reject();
+		} else {
+			console.log('verification request');
+			console.log(data.Item);
+			const _requestCode = data.Item.code.S;
+			if (code == _requestCode) {
+				resolve();
+			} else {
+				console.log('requested code doesnt match code in record');
+				reject();
+			}
+		}
+	});
+});
+
+const getPublishRequest = (requestId) => new Promise((resolve, reject) => {
+    const readClient = new aws.DynamoDB.DocumentClient({
+        region: 'us-west-2'
+    });
+
+    const params = {
+        TableName: 'publish_requests',
+        IndexName: 'request_id-index',
+        KeyConditionExpression: '#requestId = :requestId',
+        ExpressionAttributeNames: {
+            '#requestId': 'request_id'
+        },
+        ExpressionAttributeValues: {
+            ':requestId': requestId
+        }
+    };
+
+    readClient.query(params, (err, result) => {
+        if (err) {
+		reject();
+	} else {
+                if (result.Items.length != 1) {
+			console.log('wrong length');
+			console.log(result.Items);
+			reject();
+		} else {
+			resolve(result.Items[0]);
+		}
+	}
+    });
+ 
+});
+
+const verifyPublishRequest = (code, requestId) => new Promise((resolve, reject) => {
+	verifyCode(code, requestId).then(() => {
+		console.log('verified code exists');
+		getPublishRequest(requestId).then(requestData => {
+			console.log('got publish request');
+			console.log(requestData);
+			resolve();
+		});
+	});
+});
+
 const getTags = (__gameId, __userId, __query, offset = 0, limit = 10) => new Promise((__resolve, __reject) => {
     const _data = {
         aggs: {
@@ -444,7 +581,7 @@ const createRecord = (developerId, assetId, size, name, metadata) => new Promise
             'asset_id': {
                 S: assetId
             },
-            'created': {
+            'created_at': {
                 N: '' + Date.now()
             },
             'metadata': {
@@ -537,37 +674,6 @@ const createCode = (email, gameId, commit, version) => new Promise((resolve, rej
 
 });
 
-const emailOwner = (owner, code, commit) => new Promise((resolve, reject) => {
-    getOwnerEmail(owner).then(_email => {
-        const ses = new aws.SES({
-            region: 'us-west-2'
-        });
-        const params = {
-            Destination: {
-                ToAddresses: [
-                    _email
-                ]
-            },
-            Message: {
-                Body: {
-                    Html: {
-                        Charset: 'UTF-8',
-                        Data: `<html><body><a href="https://landlord.homegames.io/confirm?code=${code}&commit=${commit}">here</a> to confirm this submission</body></html>`
-                    }
-                },
-                Subject: {
-                    Charset: 'UTF-8',
-                    Data: 'Testing'
-                }
-            },
-            Source: 'landlord@homegames.io'
-        };
-        ses.sendEmail(params, (err, data) => {
-            err ? reject(err) : resolve(data);
-        });
-    });
-});
-
 const testGame = (game) => new Promise((resolve, reject) => {
     const instance = new game();
     // todo: make this good
@@ -623,6 +729,57 @@ const DEFAULT_GAME_ORDER = {
         order: 'asc'
     }
 };
+
+const getPublishRequestEvents = (requestId) => new Promise((resolve, reject) => {
+	console.log("you want publish request events for this request! " + requestId);
+            const client = new aws.DynamoDB.DocumentClient({
+                region: 'us-west-2'
+            });
+
+            const params = {
+                TableName: 'publish_events',
+                KeyConditionExpression: '#request_id= :request_id',
+                ExpressionAttributeNames: {
+                    '#request_id': 'request_id'
+                },
+                ExpressionAttributeValues: {
+                    ':request_id': requestId 
+                }
+            };
+
+            client.query(params, (err, data) => {
+		    console.log("PUBLISH EVENT DATA");
+		    console.log(data);
+		    console.log(err);
+		    resolve({events: data.Items});
+            });
+
+});
+
+const listPublishRequests = (gameId) => new Promise((resolve, reject) => {
+            const client = new aws.DynamoDB.DocumentClient({
+                region: 'us-west-2'
+            });
+
+            const params = {
+                TableName: 'publish_requests',
+                KeyConditionExpression: '#game_id = :game_id',
+                ExpressionAttributeNames: {
+                    '#game_id': 'game_id'
+                },
+                ExpressionAttributeValues: {
+                    ':game_id': gameId
+                }
+            };
+
+            client.query(params, (err, data) => {
+		    console.log("PUBLISH QUERY DATA");
+		    console.log(data);
+		    console.log(err);
+		    resolve({requests: data.Items});
+            });
+
+});
 
 const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
 
@@ -816,7 +973,11 @@ const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Headers', '*');
 
     if (req.method === 'GET') {
+
+        const publishRequestsRegex = new RegExp('/games/(\\S*)/publish_requests');
+        const publishRequestEventsRegex = new RegExp('/publish_requests/(\\S*)/events');
         const gameDetailRegex = new RegExp('/games/(\\S*)');
+
         if (req.url == '/assets') {
             const username = req.headers['hg-username'];
             const token = req.headers['hg-token'];
@@ -870,7 +1031,13 @@ const server = http.createServer((req, res) => {
                     }));
                 });
             }
-        } else if (req.url.startsWith('/confirm')) {
+        } else if (req.url.startsWith('/verify_publish_request')) {	
+            const queryObject = url.parse(req.url, true).query;
+	    const { code, requestId } = queryObject;
+	    verifyPublishRequest(code, requestId).then(() => {
+		res.end('cool thanks');
+	    });
+	} else if (req.url.startsWith('/confirm')) {
             const queryObject = url.parse(req.url, true).query;
 
             const code = queryObject.code;
@@ -980,7 +1147,36 @@ const server = http.createServer((req, res) => {
                 }
             });
 
-        } else if (req.url.match(gameDetailRegex)) {
+        } else if (req.url.match(publishRequestEventsRegex)) {
+	    const username = req.headers['hg-username'];
+            const token = req.headers['hg-token'];
+
+            if (!username || !token) {
+                res.end('no');
+            } else {
+                verifyAccessToken(username, token).then(() => {
+            		const gameId = publishRequestEventsRegex.exec(req.url)[1].split('?')[0];
+			getPublishRequestEvents(gameId).then((publishRequests) => {
+				res.end(JSON.stringify(publishRequests));
+			});
+		});
+	    }
+	
+	} else if (req.url.match(publishRequestsRegex)) {
+            const username = req.headers['hg-username'];
+            const token = req.headers['hg-token'];
+
+            if (!username || !token) {
+                res.end('no');
+            } else {
+            	const gameId = publishRequestsRegex.exec(req.url)[1].split('?')[0];
+                verifyAccessToken(username, token).then(() => {
+			listPublishRequests(gameId).then((publishRequests) => {
+				res.end(JSON.stringify(publishRequests));
+			});
+		});
+	    }
+	} else if (req.url.match(gameDetailRegex)) {
             const gameId = gameDetailRegex.exec(req.url)[1].split('?')[0];
 
             const client = new aws.DynamoDB.DocumentClient({
@@ -1026,64 +1222,68 @@ const server = http.createServer((req, res) => {
 
             });
         } else if (req.url.startsWith('/games')) {
-            const client = new aws.DynamoDB.DocumentClient({
-                region: 'us-west-2'
-            });
-            const queryObject = url.parse(req.url, true).query;
+		if (false) {//req.url.endsWith('/publish_requests')) {
+			res.end('okay at least this is different');
+		} else {
+            		const client = new aws.DynamoDB.DocumentClient({
+            		    region: 'us-west-2'
+            		});
+            		const queryObject = url.parse(req.url, true).query;
 
-            const searchQuery = queryObject.query;
-            const tags = queryObject.tags;
+            		const searchQuery = queryObject.query;
+            		const tags = queryObject.tags;
 
-            const requester = req.headers['hg-username'];
+            		const requester = req.headers['hg-username'];
 
-            if (queryObject.author) {
-                console.log('want games for just author');
-                const queryParams = {
-                    TableName: 'hg_games',
-                    ScanIndexForward: false,
-                    KeyConditionExpression: '#developer_id = :developer_id and begins_with(#game_composite, :latest)',
-                    ExpressionAttributeNames: {
-                        '#developer_id': 'developer_id',
-                        '#game_composite': 'game_composite'
-                    },
-                    ExpressionAttributeValues: {
-                        ':developer_id': queryObject.author,
-                        ':latest': 'latest'
-                    }
-                };
+            		if (queryObject.author) {
+            		    console.log('want games for just author');
+            		    const queryParams = {
+            		        TableName: 'hg_games',
+            		        ScanIndexForward: false,
+            		        KeyConditionExpression: '#developer_id = :developer_id and begins_with(#game_composite, :latest)',
+            		        ExpressionAttributeNames: {
+            		            '#developer_id': 'developer_id',
+            		            '#game_composite': 'game_composite'
+            		        },
+            		        ExpressionAttributeValues: {
+            		            ':developer_id': queryObject.author,
+            		            ':latest': 'latest'
+            		        }
+            		    };
 
-                client.query(queryParams, (err, data) => {
-                    console.log(err);
-                    if (!err) {
-                        const gameList = data.Items.map(mapGame);
-                        res.writeHead(200, {
-                            'Content-Type': 'application/json'
-                        });
+            		    client.query(queryParams, (err, data) => {
+            		        console.log(err);
+            		        if (!err) {
+            		            const gameList = data.Items.map(mapGame);
+            		            res.writeHead(200, {
+            		                'Content-Type': 'application/json'
+            		            });
 
-                        res.end(JSON.stringify({
-                            games: gameList
-                        }));
-                    } else {
-                        res.end({
-                            error: err
-                        });
-                    }
-                });
-            } else if (searchQuery) {
-                doSearch(searchQuery).then(d => {
-                    res.end(JSON.stringify({
-                        games: d
-                    }));
-                });
-            } else {
-                listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags ? tags.split(',') : []).then(d => {
-                    console.log('GAMES');
-                    console.log(d);
-                    res.end(JSON.stringify({
-                        games: d
-                    }));
-                });
-            }
+            		            res.end(JSON.stringify({
+            		                games: gameList
+            		            }));
+            		        } else {
+            		            res.end({
+            		                error: err
+            		            });
+            		        }
+            		    });
+            		} else if (searchQuery) {
+            		    doSearch(searchQuery).then(d => {
+            		        res.end(JSON.stringify({
+            		            games: d
+            		        }));
+            		    });
+            		} else {
+            		    listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags ? tags.split(',') : []).then(d => {
+            		        console.log('GAMES');
+            		        console.log(d);
+            		        res.end(JSON.stringify({
+            		            games: d
+            		        }));
+            		    });
+            		}
+		}
         } else {
             res.end('ok');
         }
@@ -1191,174 +1391,134 @@ const server = http.createServer((req, res) => {
 
                     getReqBody(req, (_data) => {
                         const data = JSON.parse(_data);
-                        console.log('want to publish game');
-                        const client = new aws.DynamoDB({
-                            region: 'us-west-2'
-                        });
-                        const readClient = new aws.DynamoDB.DocumentClient({
-                            region: 'us-west-2'
-                        });
-
                         const _gamePublishRegex = new RegExp('/games/(\\S*)/publish');
                         const gameId = _gamePublishRegex.exec(req.url)[1];
-                        const params = {
-                            TableName: 'hg_game_versions',
-                            KeyConditionExpression: '#gameId = :gameId',
-                            Limit: 1,
-                            ScanIndexForward: false,
-                            ExpressionAttributeNames: {
-                                '#gameId': 'game_id'
-                            },
-                            ExpressionAttributeValues: {
-                                ':gameId': gameId
-                            }
-                        };
 
-                        readClient.query(params, (err, result) => {
-                            if (err) {
-                                res.end(err);
-                            } else {
+			const publishData = {
+				commit: data.commit,
+				requester: username,
+				owner: data.owner,
+				repo: data.repo,
+				gameId
+			};
 
-                                let busted = false;
-                                let newVersion = '1';
+			const buildSourceInfoHash = ({sourceType, commit, owner, repo}) => {
+				const stringConcat = `${sourceType}${commit}${owner}${repo}`;
+				console.log('hashing string: ' + stringConcat);
+				return crypto.createHash('md5').update(stringConcat).digest('hex');
+			};
 
-                                if (result.Items.length) {
-                                    console.log(result);
-                                    if (result.Items[0].commit == data.commit) {
-                                        res.end('already built ' + data.commit);
-                                        busted = true;
-                                    } else {
-                                        newVersion = '' + (result.Items[0].version + 1);
-                                    }
-                                }
+			const verifyNoExistingPublishRequest = ({commit, owner, repo, gameId, requester}) => new Promise((resolve, reject) => {
 
-                                // hack
-                                if (!busted) {
+				const sourceInfoHash = buildSourceInfoHash({sourceType: SourceType.GITHUB, commit, owner, repo});
 
-                                    getBuild(data.owner, data.repo, data.commit).then((dir) => {
+				console.log('source info hash ' + sourceInfoHash);
 
-                                        const s3 = new aws.S3({
-                                            region: 'us-west-2'
-                                        });
-                                        fs.readFile(dir.zipPath, (err, buf) => {
-                                            console.log(err);
+                        	const readClient = new aws.DynamoDB.DocumentClient({
+	                            region: 'us-west-2'
+        	                });
 
-                                            const params = {
-                                                Body: buf,
-                                                ACL: 'public-read',
-                                                Bucket: 'hg-games',
-                                                Key: `${gameId}/${data.commit}.zip`
-                                            };
+				const readParams = {
+					TableName: 'publish_requests',
+					Key: {
+						"game_id": gameId,
+						"source_info_hash": sourceInfoHash
+					}
+				};
 
-                                            s3.putObject(params, (err, s3Data) => {
-                                                console.log('data');
-                                                const updateGameLatest = () => new Promise((resolve, reject) => {
+				readClient.get(readParams, (err, data) => {
+					console.log(err);
+					console.log(data);
+					
+					// todo: handle error separately
+					if (err || data.Item) {
+						reject();
+					} else {
+						resolve();
+					}
+				});
+			});
 
-                                                    getGame(gameId).then((_game) => {
-                                                        console.log('GOT GAMEEEEE');
-                                                        console.log(_game);
-                                                        const _updateParams = {
-                                                            TableName: 'hg_games',
-                                                            Key: {
-                                                                'game_id': {
-                                                                    S: gameId
-                                                                },
-                                                                'version': {
-                                                                    S: _game.version
-                                                                }
-                                                            },
-                                                            AttributeUpdates: {
-                                                                'status': {
-                                                                    Action: 'PUT',
-                                                                    Value: {
-                                                                        S: 'approved'
-                                                                    }
-                                                                },
-                                                                'approved_at': {
-                                                                    Action: 'PUT',
-                                                                    Value: {
-                                                                        N: '' + Date.now()
-                                                                    }
-                                                                }
-                                                            }
-                                                        };
+			const createPublishRequest = ({commit, owner, repo, gameId, requester}) => new Promise((resolve, reject) => {
+			
+			    const sourceInfoHash = buildSourceInfoHash({sourceType: SourceType.GITHUB, commit, owner, repo});
 
+			    const client = new aws.DynamoDB({
+			        region: 'us-west-2'
+			    });
 
-                                                        ddb.updateItem(updateParams, (err, putResult) => {
-                                                            if (!err) {
-                                                                ddb.updateItem(reqUpdateParams, (err, putResult2) => {
-                                                                    if (!err) {
+			    const requestId = `${gameId}:${sourceInfoHash}`;
 
-                                                                        const _location = `https://hg-games.s3-us-west-2.amazonaws.com/${gameId}/${data.commit}.zip`;
+			    const params = {
+			        TableName: 'publish_requests',
+			        Item: {
+				    'request_id': {
+					S: requestId
+				    },
+			            'commit_hash': {
+			                S: commit
+			            },
+			            'repo_owner': {
+			                S: owner
+			            },
+			            'repo_name': {
+			                S: repo
+			            },
+			            'game_id': {
+			                S: gameId
+			            },
+				    'requester': {
+					S: requester
+				    }, 
+				    'source_info_hash': {
+					S: sourceInfoHash
+				    },
+			            'created': {
+			                N: `${Date.now()}`
+			            },
+				    'state': {
+					S: 'SUBMITTED'
+				    }
+			        }
+			    };
+			
+			    client.putItem(params, (err, putResult) => {
+			        if (!err) {
+			            resolve({sourceInfoHash, gameId});
+			        } else {
+			            reject(err);
+			        }
+			    });
+			});
 
-                                                                        const params = {
-                                                                            TableName: 'hg_game_versions',
-                                                                            Item: {
-                                                                                'game_id': {
-                                                                                    S: gameId
-                                                                                },
-                                                                                'version': {
-                                                                                    N: newVersion
-                                                                                },
-                                                                                'created': {
-                                                                                    N: '' + Date.now()
-                                                                                },
-                                                                                'submitted_by': {
-                                                                                    S: 'todo'
-                                                                                },
-                                                                                'location': {
-                                                                                    S: _location
-                                                                                },
-                                                                                'commit': {
-                                                                                    S: data.commit
-                                                                                },
-                                                                                'status': {
-                                                                                    S: 'created'
-                                                                                }
-                                                                            }
-                                                                        };
-
-                                                                        client.putItem(params, (err, putResult) => {
-                                                                            console.log(err);
-                                                                            console.log(putResult);
-                                                                            getGameInstance(data.owner, data.repo, data.commit).then(game => {
-                                                                                testGame(game).then(() => {
-                                                                                    console.log('emailing ' + data.owner);
-                                                                                    getOwnerEmail(data.owner).then(_email => {
-                                                                                        console.log(_email);
-                                                                                        createCode(_email, gameId, data.commit, newVersion).then((code) => {
-                                                                                            console.log('created code');
-                                                                                            emailOwner(data.owner, code, data.commit).then(() => {
-                                                                                                res.end('emailed owner!');
-                                                                                            }).catch(err => {
-                                                                                                console.error(err);
-                                                                                                res.end('error');
-                                                                                            });
-                                                                                        });
-                                                                                    });
-                                                                                });
-                                                                            });
-                                                                        });
-
-                                                                    } else {
-                                                                        console.log(err);
-                                                                        res.end('hmmmmmm');
-                                                                    }
-                                                                });
-                                                            } else {
-                                                                console.log(err);
-                                                                res.end('hmmm');
-                                                            }
-                                                        });
-                                                    });
-
-                                                });
-                                            });
-                                        });
-                                    });
-                                }
-                            }
-                        });
+			verifyNoExistingPublishRequest(publishData).then(() => {
+				createPublishRequest(publishData).then((publishRecord) => {
+	                        console.log('want to publish game but just going to put an sqs message');
+				const messageBody = JSON.stringify(publishRecord);
+//
+				const sqsParams = {
+					MessageBody: messageBody,
+					QueueUrl: QUEUE_URL,
+					MessageGroupId: Date.now() + '',
+					MessageDeduplicationId: publishRecord.sourceInfoHash
+				};
+//			   
+				const sqs = new aws.SQS({region: 'us-west-2'});
+//
+				sqs.sendMessage(sqsParams, (err, sqsResponse) => {
+					console.log('sent message');
+					console.log(err);
+					console.log(sqsResponse);
+					res.end('created publish request');
+				});
+				}).catch(() => {
+					res.writeHead(500);
+					res.end('Failed to create publish request');
+				})
+			}).catch(() => {
+				res.writeHead(400);
+				res.end('Publish request already exists');
+			});
                     });
                 });
             }
