@@ -637,7 +637,7 @@ const updateGame = (developerId, gameId, gameName, description, newVersion) => n
         });
         client.batchWriteItem(params, (err, putResult) => {
             if (!err) {
-                resolve(mapGame(params.RequestItems.hg_games.PutRequest.Item));
+                resolve(mapGame(params.RequestItems.hg_games[0].PutRequest.Item));
             } else {
                 console.log(err);
                 reject();
