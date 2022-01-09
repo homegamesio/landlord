@@ -26,6 +26,8 @@ const SourceType = {
 	GITHUB: "GITHUB"
 };
 
+const config = require('./config');
+
 const getLatestGameVersion = (gameId) => new Promise((resolve, reject) => {
 	const readClient = new aws.DynamoDB.DocumentClient({
             region: 'us-west-2'
@@ -354,84 +356,6 @@ const verifyPublishRequest = (code, requestId) => new Promise((resolve, reject) 
 		});
 	});
 });
-
-const getTags = (__gameId, __userId, __query, offset = 0, limit = 10) => new Promise((__resolve, __reject) => {
-    const _data = {
-        aggs: {
-            tags: {
-                terms: {
-                    field: 'tag_id'
-                }
-            }
-        },
-        from: offset,
-        size: limit
-    };
-
-    if (__gameId) {
-        _data.query = {
-            term: {
-                'game_id': {
-                    value: __gameId
-                }
-            }
-        };
-    } else if (__userId) {
-        _data.query = {
-            term: {
-                'user_id': {
-                    value: __userId
-                }
-            }
-        }
-    } else if (__query) {
-    _data.query = {
-        match: {
-            'tag_id': {
-                query: __query,
-                fuzziness: "AUTO"
-            }
-        }
-    };
-    }
-    
-    const __data = JSON.stringify(_data);
-
-    console.log("TAG QUERY");
-    console.log(__data);
-
-    const __options = {
-        hostname: ELASTIC_SEARCH_HOST,
-        port: 443,
-        path: '/tag-index/_search?size=0',
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': __data.length
-        }
-    };
-
-    const __req = https.request(__options, __res => {
-        __res.on('data', __d => {
-            const __buf = JSON.parse(__d);
-            console.log(__buf);
-            if (__buf.aggregations && __buf.aggregations.tags.buckets.length > 0) {
-                const __results = __buf.aggregations.tags.buckets.map(item => item.key); //mapGame(hit._source));
-                __resolve(__results);
-            } else {
-                __resolve([]);
-            }
-
-        });
-    });
-
-    __req.write(__data);
-
-    __req.end();
-});
-
-
-
 
 const getBuild = (owner, repo, commit = undefined) => new Promise((resolve, reject) => {
     // todo: uuid
@@ -947,172 +871,243 @@ const listPublishRequests = (gameId) => new Promise((resolve, reject) => {
 
 });
 
-const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
+const listGamesForAuthor = ({ author, page, limit }) => new Promise((resolve, reject) => {
 
-    const _data = {
-        from: offset,
-        size: limit
+    const client = new aws.DynamoDB.DocumentClient({
+        region: config.DYNAMO_REGION
+    });
+
+    const params = {
+        TableName: 'games',
+        IndexName: 'created_by_index',
+        KeyConditionExpression: '#created_by = :created_by',
+        ExpressionAttributeNames: {
+            '#created_by': 'created_by'
+        },
+        ExpressionAttributeValues: {
+            ':created_by': author
+        }
     };
 
-    console.log("I GOT TAGS");
-    console.log(tags);
-
-    let data, options;
-
-    if (tags.length > 0) {
-        _data.query = {
-            terms: {
-                tag_id: tags
-            }
-        };
-
-        data = JSON.stringify(_data);
-
-        options = {
-            hostname: ELASTIC_SEARCH_HOST,
-            port: 443,
-            path: '/tag-index/_search',
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': data.length
-            }
-        };
-
-        // this is terrible
-
-        let gameIds = [];
-
-        const req = https.request(options, _res => {
-            let _buf = '';
-            _res.on('data', d => {
-                _buf += d;
-            });
-
-            _res.on('end', () => {
-                const buf = JSON.parse(_buf);
-                console.log('tag response');
-                console.log(buf);
-                if (buf.hits && buf.hits.hits) {
-                    gameIds = buf.hits.hits.map(hit => hit._source);
-                }
-
-                const gameQuery = {
-                    query: {
-                        bool: {
-                            must: [{
-                                    exists: {
-                                        field: 'latest_approved_version'
-                                    },
-                                },
-                                {
-                                    terms: {
-                                        game_id: gameIds
-                                    }
-                                },
-                            ]
-                        }
-                    },
-                    sort
-                };
-
-                const gameReq = JSON.stringify(gameQuery);
-
-                const gameOptions = {
-                    hostname: ELASTIC_SEARCH_HOST,
-                    port: 443,
-                    path: '/lambda-index/_search',
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Content-Length': gameReq.length
-                    }
-                };
-
-                const req2 = https.request(gameOptions, _res2 => {
-                    let _buf2 = '';
-                    _res2.on('data', d2 => {
-                        _buf2 += d2;
-                    });
-
-                    _res2.on('end', () => {
-                        const buf2 = JSON.parse(_buf2);
-                        console.log('games from tags giigig');
-                        console.log(buf2);
-                        let gameList = [];
-                        if (buf2.hits && buf2.hits.total.value > 0) {
-                            console.log('I know I have games');
-                            console.log(buf2.hits.hits);
-                            gameList = buf2.hits.hits.map(hit => mapGame(hit._source));
-                        }
-
-                        resolve(gameList);
-                    });
-                });
-
-                req2.write(gameReq);
-                req2.end();
-
-            });
-
-        });
-
-        req.write(data);
-
-        req.end();
-
-    } else {
-        _data.query = {
-            exists: {
-                field: 'latest_approved_version'
-            }
-        };
-
-        _data.sort = sort;
-
-        if (query) {
-            _data.query.query_string = query;
+    client.query(params, (err, data) => {
+        if (err) {
+            reject([{error: err}]);
+        } else {
+            resolve(data.Items);
         }
+    });
 
-        data = JSON.stringify(_data);
+});
 
-        options = {
-            hostname: ELASTIC_SEARCH_HOST,
-            port: 443,
-            path: '/lambda-index/_search',
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': data.length
-            }
-        };
+const queryGames = (query) => new Promise((resolve, reject) => {
+    const client = new aws.DynamoDB.DocumentClient({
+        region: config.DYNAMO_REGION
+    });
 
-        const req = https.request(options, _res => {
-            let _buf = '';
-            _res.on('data', d => {
-                _buf += d;
-            });
+    const params = {
+        TableName: 'games',
+        IndexName: 'name_index',
+        KeyConditionExpression: '#published_state = :public and begins_with(#name, :name)',
+        ExpressionAttributeNames: {
+            '#published_state': 'published_state',
+            '#name': 'name'
+        },
+        ExpressionAttributeValues: {
+            ':name': query,
+            ':public': 'public'
+        }
+    };
 
-            _res.on('end', () => {
-                const buf = JSON.parse(_buf);
-                console.log('giigig');
-                console.log(buf);
-                let gameList = [];
-                if (buf.hits && buf.hits.total.value > 0) {
-                    console.log('I know I have games');
-                    console.log(buf.hits.hits);
-                    gameList = buf.hits.hits.map(hit => mapGame(hit._source));
-                }
+    client.query(params, (err, data) => {
+        if (err) {
+            console.log(err);
+            reject(err);
+        } else {
+            resolve(data.Items);
+        }
+    });
+});
 
-                resolve(gameList);
-            });
+const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
 
-        });
+    const client = new aws.DynamoDB.DocumentClient({
+        region: config.DYNAMO_REGION
+    });
 
-        req.write(data);
+    const queryParams = {
+        TableName: 'games',
+        PageSize: 100
+    };
 
-        req.end();
-    }
+    client.scan(queryParams, (err, data) => {
+        console.log("got data");
+        console.log(data);
+        console.log(err);
+         
+    });
+    // const _data = {
+    //     from: offset,
+    //     size: limit
+    // };
+
+    // resolve([]);
+
+//    let data, options;
+//
+//    if (tags.length > 0) {
+//        _data.query = {
+//            terms: {
+//                tag_id: tags
+//            }
+//        };
+//
+//        data = JSON.stringify(_data);
+//
+//        options = {
+//            hostname: ELASTIC_SEARCH_HOST,
+//            port: 443,
+//            path: '/tag-index/_search',
+//            method: 'GET',
+//            headers: {
+//                'Content-Type': 'application/json',
+//                'Content-Length': data.length
+//            }
+//        };
+//
+//        // this is terrible
+//
+//        let gameIds = [];
+//
+//        const req = https.request(options, _res => {
+//            let _buf = '';
+//            _res.on('data', d => {
+//                _buf += d;
+//            });
+//
+//            _res.on('end', () => {
+//                const buf = JSON.parse(_buf);
+//                console.log('tag response');
+//                console.log(buf);
+//                if (buf.hits && buf.hits.hits) {
+//                    gameIds = buf.hits.hits.map(hit => hit._source);
+//                }
+//
+//                const gameQuery = {
+//                    query: {
+//                        bool: {
+//                            must: [{
+//                                    exists: {
+//                                        field: 'latest_approved_version'
+//                                    },
+//                                },
+//                                {
+//                                    terms: {
+//                                        game_id: gameIds
+//                                    }
+//                                },
+//                            ]
+//                        }
+//                    },
+//                    sort
+//                };
+//
+//                const gameReq = JSON.stringify(gameQuery);
+//
+//                const gameOptions = {
+//                    hostname: ELASTIC_SEARCH_HOST,
+//                    port: 443,
+//                    path: '/lambda-index/_search',
+//                    method: 'GET',
+//                    headers: {
+//                        'Content-Type': 'application/json',
+//                        'Content-Length': gameReq.length
+//                    }
+//                };
+//
+//                const req2 = https.request(gameOptions, _res2 => {
+//                    let _buf2 = '';
+//                    _res2.on('data', d2 => {
+//                        _buf2 += d2;
+//                    });
+//
+//                    _res2.on('end', () => {
+//                        const buf2 = JSON.parse(_buf2);
+//                        console.log('games from tags giigig');
+//                        console.log(buf2);
+//                        let gameList = [];
+//                        if (buf2.hits && buf2.hits.total.value > 0) {
+//                            console.log('I know I have games');
+//                            console.log(buf2.hits.hits);
+//                            gameList = buf2.hits.hits.map(hit => mapGame(hit._source));
+//                        }
+//
+//                        resolve(gameList);
+//                    });
+//                });
+//
+//                req2.write(gameReq);
+//                req2.end();
+//
+//            });
+//
+//        });
+//
+//        req.write(data);
+//
+//        req.end();
+//
+//    } else {
+//        _data.query = {
+//            exists: {
+//                field: 'latest_approved_version'
+//            }
+//        };
+//
+//        _data.sort = sort;
+//
+//        if (query) {
+//            _data.query.query_string = query;
+//        }
+//
+//        data = JSON.stringify(_data);
+//
+//        options = {
+//            hostname: ELASTIC_SEARCH_HOST,
+//            port: 443,
+//            path: '/lambda-index/_search',
+//            method: 'GET',
+//            headers: {
+//                'Content-Type': 'application/json',
+//                'Content-Length': data.length
+//            }
+//        };
+//
+//        const req = https.request(options, _res => {
+//            let _buf = '';
+//            _res.on('data', d => {
+//                _buf += d;
+//            });
+//
+//            _res.on('end', () => {
+//                const buf = JSON.parse(_buf);
+//                console.log('giigig');
+//                console.log(buf);
+//                let gameList = [];
+//                if (buf.hits && buf.hits.total.value > 0) {
+//                    console.log('I know I have games');
+//                    console.log(buf.hits.hits);
+//                    gameList = buf.hits.hits.map(hit => mapGame(hit._source));
+//                }
+//
+//                resolve(gameList);
+//            });
+//
+//        });
+//
+//        req.write(data);
+//
+//        req.end();
+//    }
 });
 
 const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) => {
@@ -1391,64 +1386,92 @@ const server = http.createServer((req, res) => {
 
             });
         } else if (req.url.startsWith('/games')) {
-            		const client = new aws.DynamoDB.DocumentClient({
-            		    region: 'us-west-2'
-            		});
-            		const queryObject = url.parse(req.url, true).query;
+            const queryObject = url.parse(req.url, true).query;
+            const { query, author, page, limit } = queryObject;
+            if (author) {
+                console.log('you want games by author ' + author);
+                // verifyAccessToken(username, token).then(() => {
+                listGamesForAuthor({ author, page, limit }).then((data) => {
+                    res.writeHead(200, {
+                        'Content-Type': 'application/json'
+                    });
+                    res.end(JSON.stringify({
+                        games: data
+                    }));
+                });
+                // });
+            } else if (query) {
+                queryGames(query).then(data => {
+                   res.writeHead(200, {
+                        'Content-Type': 'application/json'
+                    });
+                    res.end(JSON.stringify({
+                        games: data
+                    })); 
+                });
+            } else {
+                res.writeHead(400);
+                res.end('Listing games is not yet supported');
+            }
 
-            		const searchQuery = queryObject.query;
-            		const tags = queryObject.tags;
+            		// const client = new aws.DynamoDB.DocumentClient({
+            		//     region: 'us-west-2'
+            		// });
+            		// const queryObject = url.parse(req.url, true).query;
 
-            		const requester = req.headers['hg-username'];
+            		// const searchQuery = queryObject.query;
+            		// const tags = queryObject.tags;
 
-            		if (queryObject.author) {
-            		    console.log('want games for just author');
-            		    const queryParams = {
-            		        TableName: 'hg_games',
-            		        ScanIndexForward: false,
-            		        KeyConditionExpression: '#developer_id = :developer_id and begins_with(#game_composite, :latest)',
-            		        ExpressionAttributeNames: {
-            		            '#developer_id': 'developer_id',
-            		            '#game_composite': 'game_composite'
-            		        },
-            		        ExpressionAttributeValues: {
-            		            ':developer_id': queryObject.author,
-            		            ':latest': 'latest'
-            		        }
-            		    };
+            		// const requester = req.headers['hg-username'];
 
-            		    client.query(queryParams, (err, data) => {
-            		        console.log(err);
-            		        if (!err) {
-            		            const gameList = data.Items.map(mapGame);
-            		            res.writeHead(200, {
-            		                'Content-Type': 'application/json'
-            		            });
+            		// if (queryObject.author) {
+            		//     console.log('want games for just author');
+            		//     const queryParams = {
+            		//         TableName: 'hg_games',
+            		//         ScanIndexForward: false,
+            		//         KeyConditionExpression: '#developer_id = :developer_id and begins_with(#game_composite, :latest)',
+            		//         ExpressionAttributeNames: {
+            		//             '#developer_id': 'developer_id',
+            		//             '#game_composite': 'game_composite'
+            		//         },
+            		//         ExpressionAttributeValues: {
+            		//             ':developer_id': queryObject.author,
+            		//             ':latest': 'latest'
+            		//         }
+            		//     };
 
-            		            res.end(JSON.stringify({
-            		                games: gameList
-            		            }));
-            		        } else {
-            		            res.end({
-            		                error: err
-            		            });
-            		        }
-            		    });
-            		} else if (searchQuery) {
-            		    doSearch(searchQuery).then(d => {
-            		        res.end(JSON.stringify({
-            		            games: d
-            		        }));
-            		    });
-            		} else {
-            		    listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags ? tags.split(',') : []).then(d => {
-            		        console.log('GAMES');
-            		        console.log(d);
-            		        res.end(JSON.stringify({
-            		            games: d
-            		        }));
-            		    });
-            		}
+            		//     client.query(queryParams, (err, data) => {
+            		//         console.log(err);
+            		//         if (!err) {
+            		//             const gameList = data.Items.map(mapGame);
+            		//             res.writeHead(200, {
+            		//                 'Content-Type': 'application/json'
+            		//             });
+
+            		//             res.end(JSON.stringify({
+            		//                 games: gameList
+            		//             }));
+            		//         } else {
+            		//             res.end({
+            		//                 error: err
+            		//             });
+            		//         }
+            		//     });
+            		// } else if (searchQuery) {
+            		//     doSearch(searchQuery).then(d => {
+            		//         res.end(JSON.stringify({
+            		//             games: d
+            		//         }));
+            		//     });
+            		// } else {
+            		//     listGames(10, 0, DEFAULT_GAME_ORDER, searchQuery, tags ? tags.split(',') : []).then(d => {
+            		//         console.log('GAMES');
+            		//         console.log(d);
+            		//         res.end(JSON.stringify({
+            		//             games: d
+            		//         }));
+            		//     });
+            		// }
         } else {
             res.end('ok');
         }
