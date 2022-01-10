@@ -921,7 +921,9 @@ const getGameDetails = (gameId) => new Promise((resolve, reject) => {
             console.log(err);
             reject(err);
         } else {
-            resolve(data.Items.map(mapGameVersion));
+            resolve({
+                versions: data.Items.map(mapGameVersion)
+            });
         }
     });
 });
