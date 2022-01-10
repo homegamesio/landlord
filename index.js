@@ -899,6 +899,38 @@ const listGamesForAuthor = ({ author, page, limit }) => new Promise((resolve, re
 
 });
 
+const getGameDetails = (gameId) => new Promise((resolve, reject) => { 
+    const client = new aws.DynamoDB.DocumentClient({
+        region: config.DYNAMO_REGION
+    });
+
+    const params = {
+        TableName: 'game_versions',
+        // IndexName: 'name_index',
+        KeyConditionExpression: '#game_id = :game_id',
+        ExpressionAttributeNames: {
+            '#game_id': 'game_id'
+        },
+        ExpressionAttributeValues: {
+            ':game_id': gameId
+        }
+    };
+
+    client.query(params, (err, data) => {
+        if (err) {
+            console.log(err);
+            reject(err);
+        } else {
+            resolve(data.Items.map(mapGameVersion));
+        }
+    });
+});
+
+const mapGameVersion = (gameVersion) => {
+    console.log('need to map this');
+    return gameVersion;
+};
+
 const queryGames = (query) => new Promise((resolve, reject) => {
     const client = new aws.DynamoDB.DocumentClient({
         region: config.DYNAMO_REGION
@@ -1353,48 +1385,55 @@ const server = http.createServer((req, res) => {
 	} else if (req.url.match(gameDetailRegex)) {
             const gameId = gameDetailRegex.exec(req.url)[1].split('?')[0];
 
-            const client = new aws.DynamoDB.DocumentClient({
-                region: 'us-west-2'
-            });
-
-            const params = {
-                TableName: 'hg_game_versions',
-                ScanIndexForward: false,
-                KeyConditionExpression: '#game_id = :game_id',
-                ExpressionAttributeNames: {
-                    '#game_id': 'game_id'
-                },
-                ExpressionAttributeValues: {
-                    ':game_id': gameId
-                }
-            };
-
-            client.query(params, (err, data) => {
-                const results = data.Items.map(i => {
-                    return {
-                        version: i.version,
-                        created: new Date(i.created),
-                        commit: i.commit,
-                        'status': i.status,
-                        'location': i.location
-                    };
-                });
-
-
-                getTags(gameId).then(tags => {
-
-                    console.log('GGGG TAGS');
-                    console.log(tags);
-                    res.writeHead(200, {
+            getGameDetails(gameId).then(data => {
+                   res.writeHead(200, {
                         'Content-Type': 'application/json'
                     });
                     res.end(JSON.stringify({
-                        tags,
-                        versions: results
-                    }));
-                });
+                        games: data
+                    })); 
+                });            // const client = new aws.DynamoDB.DocumentClient({
+            //     region: 'us-west-2'
+            // });
 
-            });
+            // const params = {
+            //     TableName: 'hg_game_versions',
+            //     ScanIndexForward: false,
+            //     KeyConditionExpression: '#game_id = :game_id',
+            //     ExpressionAttributeNames: {
+            //         '#game_id': 'game_id'
+            //     },
+            //     ExpressionAttributeValues: {
+            //         ':game_id': gameId
+            //     }
+            // };
+
+            // client.query(params, (err, data) => {
+            //     const results = data.Items.map(i => {
+            //         return {
+            //             version: i.version,
+            //             created: new Date(i.created),
+            //             commit: i.commit,
+            //             'status': i.status,
+            //             'location': i.location
+            //         };
+            //     });
+
+
+                // getTags(gameId).then(tags => {
+
+                //     console.log('GGGG TAGS');
+                //     console.log(tags);
+                //     res.writeHead(200, {
+                //         'Content-Type': 'application/json'
+                //     });
+                //     res.end(JSON.stringify({
+                //         tags,
+                //         versions: results
+                //     }));
+                // });
+
+            // });
         } else if (req.url.startsWith('/games')) {
             const queryObject = url.parse(req.url, true).query;
             const { query, author, page, limit } = queryObject;
