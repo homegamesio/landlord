@@ -468,17 +468,17 @@ const getGame = (gameId, developerId, version = null) => new Promise((resolve, r
         });
 });
 
-const mapGame = (dynamoRecord) => {
-    return {
-        name: dynamoRecord.game_name && dynamoRecord.game_name.S || dynamoRecord.game_name,
-        created: dynamoRecord.created && dynamoRecord.created.N || dynamoRecord.created,
-        author: dynamoRecord.developer_id && dynamoRecord.developer_id.S || dynamoRecord.developer_id || dynamoRecord.author,
-        id: dynamoRecord.game_id && dynamoRecord.game_id.S || dynamoRecord.game_id,
-        version: dynamoRecord.version && dynamoRecord.version.N || dynamoRecord.version,
-        description: dynamoRecord.description && dynamoRecord.description.S || dynamoRecord.description,
-        latest_approved_version: dynamoRecord.latest_approved_version && dynamoRecord.latest_approved_version.N || dynamoRecord.latest_approved_version
-    };
-};
+//const mapGame = (dynamoRecord) => {
+//    return {
+//        name: dynamoRecord.game_name && dynamoRecord.game_name.S || dynamoRecord.game_name,
+//        created: dynamoRecord.created && dynamoRecord.created.N || dynamoRecord.created,
+//        author: dynamoRecord.developer_id && dynamoRecord.developer_id.S || dynamoRecord.developer_id || dynamoRecord.author,
+//        id: dynamoRecord.game_id && dynamoRecord.game_id.S || dynamoRecord.game_id,
+//        version: dynamoRecord.version && dynamoRecord.version.N || dynamoRecord.version,
+//        description: dynamoRecord.description && dynamoRecord.description.S || dynamoRecord.description,
+//        latest_approved_version: dynamoRecord.latest_approved_version && dynamoRecord.latest_approved_version.N || dynamoRecord.latest_approved_version
+//    };
+//};
 
 const updateGame = (developerId, gameId, gameName, description, newVersion) => new Promise((resolve, reject) => {
 	console.log("updating game: " + gameId);
@@ -893,7 +893,7 @@ const listGamesForAuthor = ({ author, page, limit }) => new Promise((resolve, re
         if (err) {
             reject([{error: err}]);
         } else {
-            resolve(data.Items);
+            resolve(data.Items.map(mapGame));
         }
     });
 
@@ -923,10 +923,20 @@ const queryGames = (query) => new Promise((resolve, reject) => {
             console.log(err);
             reject(err);
         } else {
-            resolve(data.Items);
+            resolve(data.Items.map(mapGame));
         }
     });
 });
+
+const mapGame = (game) => {
+    return {
+        createdBy: game.created_by,
+        createdAt: new Date(game.created_on),
+        id: game.game_id,
+        thumbnail: game.thumbnail,
+        name: game.name
+    }
+};
 
 const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
 
