@@ -5,6 +5,7 @@ const url = require('url');
 const archiver = require('archiver');
 const fs = require('fs');
 const aws = require('aws-sdk');
+const querystring = require('querystring');
 const {
     v4: uuidv4
 } = require('uuid');
@@ -27,6 +28,26 @@ const SourceType = {
 };
 
 const config = require('./config');
+
+const uploadThumbnail = (username, gameId, thumbnail) => new Promise((resolve, reject) => {
+	console.log('need to upload to s3');
+	console.log(thumbnail);
+	console.log(thumbnail.headers);
+	const assetId = generateId();
+
+	const childSession = fork(path.join(__dirname, 'upload.js'),
+            [
+                `--path=${thumbnail.path}`,
+                `--developer=${username}`,
+                `--id=${assetId}`,
+                `--name=${thumbnail.originalFilename}`,
+                `--size=${thumbnail.size}`,
+                `--type=${thumbnail.headers['content-type']}`
+            ]
+        );
+
+	resolve('https://assets.homegames.io/' + assetId);
+});
 
 const getLatestGameVersion = (gameId) => new Promise((resolve, reject) => {
 	const readClient = new aws.DynamoDB.DocumentClient({
@@ -422,7 +443,7 @@ const getHash = (input) => {
     return crypto.createHash('md5').update(input).digest('hex');
 };
 
-const generateGameId = () => getHash(uuidv4());
+const generateId = () => getHash(uuidv4());
 
 const getReqBody = (req, cb) => {
     let _body = '';
@@ -963,32 +984,50 @@ const queryGames = (query) => new Promise((resolve, reject) => {
 });
 
 const mapGame = (game) => {
+	console.log('mapping game');
+	console.log(game);
     return {
-        createdBy: game.created_by,
-        createdAt: new Date(game.created_on),
-        id: game.game_id,
-        thumbnail: game.thumbnail,
-        name: game.name
+	    createdBy: game.created_by && game.created_by.S ? game.created_by.S : game.created_by,
+        createdAt: game.created_on && game.created_on.N ? game.created_on.N : game.created_on,
+        id: game.game_id && game.game_id.S ? game.game_id.S : game.game_id,
+        thumbnail: game.thumbnail && game.thumbnail.S ? game.thumbnail.S : game.thumbnail,
+        name: game.name && game.name.S ? game.name.S : game.name
     }
 };
 
+let gamesCache = {};
+
 const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
+	if (gamesCache.timestamp && gamesCache.timestamp > Date.now() - (1 * 1000 * 60)) { //5 mins
+		console.log('returning from cache');
+		resolve(gamesCache.games);
+	} else {
+		console.log('fetching from dynamo');
+    		const client = new aws.DynamoDB.DocumentClient({
+    		    region: config.DYNAMO_REGION
+    		});
 
-    const client = new aws.DynamoDB.DocumentClient({
-        region: config.DYNAMO_REGION
-    });
+    		const queryParams = {
+    		    TableName: 'games',
+    		};
 
-    const queryParams = {
-        TableName: 'games',
-        PageSize: 100
-    };
-
-    client.scan(queryParams, (err, data) => {
-        console.log("got data");
-        console.log(data);
-        console.log(err);
-         
-    });
+    		client.scan(queryParams, (err, data) => {
+    		    console.log("got data");
+    		    console.log(data);
+    		    console.log(err);
+    		        if (err) {
+    		    	reject();
+    		        } else {
+            		const gameList = data.Items.map(mapGame);
+			gamesCache = {
+				games: gameList,
+				timestamp: Date.now()
+			};
+    		    	resolve(gameList);
+    		        }
+    		     
+    		});
+	}
     // const _data = {
     //     from: offset,
     //     size: limit
@@ -1459,8 +1498,14 @@ const server = http.createServer((req, res) => {
                     })); 
                 });
             } else {
-                res.writeHead(400);
-                res.end('Listing games is not yet supported');
+		    listGames().then(games => {
+                        res.writeHead(200, {
+                             'Content-Type': 'application/json'
+                         });
+                         res.end(JSON.stringify({
+                             games
+                         })); 
+		    });
             }
 
             		// const client = new aws.DynamoDB.DocumentClient({
@@ -1538,7 +1583,9 @@ const server = http.createServer((req, res) => {
                     const form = new multiparty.Form();
 
                     getReqBody(req, (_data) => {
-                        const data = JSON.parse(_data);
+			const parsedData = querystring.decode(_data);
+			    console.log('parsed data');
+			    console.log(parsedData);
                         const client = new aws.DynamoDB({
                             region: 'us-west-2'
                         });
@@ -1837,129 +1884,78 @@ const server = http.createServer((req, res) => {
                 res.end('no');
             } else {
                 verifyAccessToken(username, token).then(() => {
-                    getReqBody(req, (_data) => {
-                        console.log('sdd');
-                        const data = JSON.parse(_data);
 
-                        const readClient = new aws.DynamoDB.DocumentClient({
-                            region: 'us-west-2'
-                        });
+                    const form = new multiparty.Form();
+                    form.parse(req, (err, fields, files) => {
+			    if (err) {
+				console.error('error parsing form');
+				console.error(err);
+				res.end('error');
+			    } else {
+				    console.log('files and fields');
+				    console.log(files);
+				    console.log(fields);
+				    if (!files.thumbnail || !files.thumbnail.length || !fields.name || !fields.name.length || !fields.description || !fields.description.length) {
+					res.end('creation requires name, thumbnail & description');
+				    } else {
+					console.log('ned to upload to s3 then create in dynamo');
+	                               	const gameId = generateId();
+					uploadThumbnail(username, gameId, files.thumbnail[0]).then((url) => {
+                                   	const nowString = '' + Date.now();
+	                                const params = {
+	                                    RequestItems: {
+	                                        [config.GAME_TABLE]: [{
+	                                                PutRequest: {
+	                                                    Item: {
+	                                                        'game_id': {
+	                                                            S: gameId
+	                                                        },
+	                                                        'created_by': {
+	                                                            S: username
+	                                                        },
+	                                                        'name': {
+	                                                            S: fields.name[0]
+	                                                        },
+	                                                        'created_on': {
+	                                                            N: nowString
+	                                                        },
+	                                                        'updated': {
+	                                                            N: nowString
+	                                                        },
+	                                                        'description': {
+	                                                            S: fields.description[0] 
+	                                                        },
+								'thumbnail': {
+								    S: url
+								}
+	                                                    }
+	                                                }
+	                                        }]
+					    }
+	                                };
+	
+	                                const client = new aws.DynamoDB({
+	                                    region: 'us-west-2'
+	                                });
+	                                client.batchWriteItem(params, (err, putResult) => {
+	
+	                                    console.log(err);
+	                                    console.log(putResult);
+	
+	                                    if (!err) {
+	                                        res.writeHead(200, {
+	                                            'Content-Type': 'application/json'
+	                                        });
+	                                        res.end(JSON.stringify(mapGame(params.RequestItems[config.GAME_TABLE][0].PutRequest.Item)));
+	                                    } else {
+	                                        console.log(err);
+	                                        res.end('error');
+	                                    }
+	                                });
 
-                        const params = {
-                            TableName: 'hg_games',
-                            IndexName: 'dev_game_name_index',
-                            KeyConditionExpression: '#devId = :devId and #gameName = :gameName',
-                            ExpressionAttributeNames: {
-                                '#devId': 'developer_id',
-                                '#gameName': 'game_name'
-                            },
-                            ExpressionAttributeValues: {
-                                ':devId': username,
-                                ':gameName': data.game_name
-                            }
-                        };
-
-                        readClient.query(params, (err, result) => {
-                            if (err) {
-                                res.end(err.toString());
-                            } else {
-                                if (result.Items.length) {
-                                    res.writeHead(400, {
-                                        'Content-Type': 'text/plain'
-                                    });
-                                    res.end('that already exists');
-                                } else {
-                                    const gameId = generateGameId();
-                                    const nowString = '' + Date.now();
-                                    const descriptionString = ('' + data.description) || 'No description provided';
-                                    console.log('wat');
-                                    const params = {
-                                        RequestItems: {
-                                            'hg_games': [{
-                                                    PutRequest: {
-                                                        Item: {
-                                                            'game_composite': {
-                                                                S: `latest:${gameId}`
-                                                            },
-                                                            'game_id': {
-                                                                S: gameId
-                                                            },
-                                                            'developer_id': {
-                                                                S: username
-                                                            },
-                                                            'game_name': {
-                                                                S: data.game_name
-                                                            },
-                                                            'created': {
-                                                                N: nowString
-                                                            },
-                                                            'version': {
-                                                                N: '1'
-                                                            },
-                                                            'updated': {
-                                                                N: nowString
-                                                            },
-                                                            'description': {
-                                                                S: descriptionString
-                                                            }
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    PutRequest: {
-                                                        Item: {
-                                                            'game_composite': {
-                                                                S: `${gameId}:1`
-                                                            },
-                                                            'game_id': {
-                                                                S: gameId
-                                                            },
-                                                            'developer_id': {
-                                                                S: username
-                                                            },
-                                                            'game_name': {
-                                                                S: data.game_name
-                                                            },
-                                                            'created': {
-                                                                N: nowString
-                                                            },
-                                                            'version': {
-                                                                N: '1'
-                                                            },
-                                                            'updated': {
-                                                                N: nowString
-                                                            },
-                                                            'description': {
-                                                                S: descriptionString
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    };
-
-                                    const client = new aws.DynamoDB({
-                                        region: 'us-west-2'
-                                    });
-                                    client.batchWriteItem(params, (err, putResult) => {
-
-                                        console.log(err);
-                                        console.log(putResult);
-
-                                        if (!err) {
-                                            res.writeHead(200, {
-                                                'Content-Type': 'application/json'
-                                            });
-                                            res.end(JSON.stringify(mapGame(params.RequestItems.hg_games[0].PutRequest.Item)));
-                                        } else {
-                                            console.log(err);
-                                            res.end('error');
-                                        }
-                                    });
-                                }
-                            }
-                        });
+				    });
+				}
+			    }
                     });
                 }).catch(err => {
                     console.log(err);
