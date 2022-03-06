@@ -56,7 +56,7 @@ const getLatestGameVersion = (gameId) => new Promise((resolve, reject) => {
 
         console.log(gameId);
         const params = {
-            TableName: 'hg_game_versions',
+            TableName: 'game_versions',
             ScanIndexForward: false,
 	    Limit: 1,
             KeyConditionExpression: '#game_id = :game_id',
@@ -69,6 +69,10 @@ const getLatestGameVersion = (gameId) => new Promise((resolve, reject) => {
         };
 
         readClient.query(params, (err, results) => {
+		console.log('getLatestGameVerison results and err');
+		console.log(err);
+		console.log(results);
+
             if (err) {
                 reject(err.toString());
             } else {
@@ -106,22 +110,34 @@ const publishGameVersion = (publishRequest) => new Promise((resolve, reject) => 
 			    getGame(gameId, publishRequest.requester).then(gameData => {
 	
 		    		const params = {
-		    		    TableName: 'hg_game_versions',
+		    		    TableName: 'game_versions',
 		    		    Item: {
 		    		        'version': {
 				    	    	N: '' + newVersion
 		    		        },
+					'commit_hash': {
+						S: publishRequest.commit_hash
+					},
+					'description': {
+						S: publishRequest.notes || 'No description available'
+					},
 					'location': {
 						S: s3Url
 					},
-					'created': {
+					'published_at': {
 						N: '' + Date.now()
+					},
+					'published_by': {
+						S: publishRequest.requester
 					},
 					'request_id': {
 						S: requestId
 					},
 					'game_id': {
 						S: gameId
+					},
+					'version_id': {
+						S: generateId()
 					}
 		    		    }
 		    		};
@@ -129,16 +145,7 @@ const publishGameVersion = (publishRequest) => new Promise((resolve, reject) => 
 		    		client.putItem(params, (err, putResult) => {
 		    		    if (!err) {
 					    console.log('published new game version of game id ' + gameId);
-					    console.log('now need to update latest approved version of game');
-				    		updateGame(publishRequest.requester, gameId, gameData.name, gameData.description, newVersion).then(() => {
-							console.log('set latest approved verion');
 		    		        		resolve();
-						}).catch(err => {
-							console.log('failed to set latest approved version');
-							console.log(err);
-							reject();
-						});
-
 		    		    } else {
 					    console.log('failed to publish version');
 					    console.log(err);
@@ -458,20 +465,15 @@ const getReqBody = (req, cb) => {
 
 const getGame = (gameId, developerId, version = null) => new Promise((resolve, reject) => {
 
-	const compositeString = version ? `${version}:${gameId}` : `latest:${gameId}`;
-
         const client = new aws.DynamoDB({
             region: 'us-west-2'
         });
 
         const params = {
-            TableName: 'hg_games',
+            TableName: 'games',
             Key: {
-		    'developer_id': {
-			S: developerId
-		    },
-		    'game_composite': {
-			S: compositeString
+		    'game_id': {
+			S: gameId 
 		    }
             }
         };
@@ -951,7 +953,17 @@ const getGameDetails = (gameId) => new Promise((resolve, reject) => {
 
 const mapGameVersion = (gameVersion) => {
     console.log('need to map this');
-    return gameVersion;
+    console.log(gameVersion);
+    return {
+	version: gameVersion.version,
+	publishedBy: gameVersion.published_by,
+	'location': gameVersion['location'],
+	description: gameVersion.description,
+	versionId: gameVersion.version_id,
+	publishedAt: gameVersion.published_at,
+	commitHash: gameVersion.commit_hash,
+	gameId: gameVersion.game_id
+    };
 };
 
 const queryGames = (query) => new Promise((resolve, reject) => {
@@ -1247,6 +1259,7 @@ const server = http.createServer((req, res) => {
         const publishRequestsRegex = new RegExp('/games/(\\S*)/publish_requests');
         const publishRequestEventsRegex = new RegExp('/publish_requests/(\\S*)/events');
         const gameDetailRegex = new RegExp('/games/(\\S*)');
+        const gameVersionDetailRegex = new RegExp('/games/(\\S*)/version/(\\S*)');
 
         if (req.url == '/assets') {
             const username = req.headers['hg-username'];
@@ -1449,6 +1462,27 @@ const server = http.createServer((req, res) => {
 			});
 		});
 	    }
+	} else if (req.url.match(gameVersionDetailRegex)) {
+            const match = gameVersionDetailRegex.exec(req.url);
+	    console.log("MATCH");
+	    console.log(match);
+	    const gameId = match[1].split('?')[0];
+	    const versionId = match[2].split('?')[0];
+	    // maybe make separate index for verison ID to fetch directly at some point
+	    getGameDetails(gameId).then(data => {
+		console.log('got game details, looking for ' + versionId);
+		console.log(data);
+		const foundVersion = data.versions.find(v => v.versionId === versionId);
+		if (!foundVersion) {
+			res.end('Version not found');
+		} else {
+			res.end(JSON.stringify(foundVersion));
+		}
+	    }).catch((err) => {
+		console.log('game detail fetch err');
+		console.log(err);
+		res.end('Game not found');
+	    });
 	} else if (req.url.match(gameDetailRegex)) {
             const gameId = gameDetailRegex.exec(req.url)[1].split('?')[0];
 
@@ -1694,6 +1728,7 @@ const server = http.createServer((req, res) => {
                 });
             }
         } else if (req.url.match(gamePublishRegex)) {
+  	    console.log('publishing game');	
             const username = req.headers['hg-username'];
             const token = req.headers['hg-token'];
 
@@ -1715,6 +1750,9 @@ const server = http.createServer((req, res) => {
 				repo: data.repo,
 				gameId
 			};
+
+			console.log('publishing with payload');
+			console.log(publishData);
 
 			const buildSourceInfoHash = ({sourceType, commit, owner, repo}) => {
 				const stringConcat = `${sourceType}${commit}${owner}${repo}`;
@@ -1808,6 +1846,9 @@ const server = http.createServer((req, res) => {
 			verifyNoExistingPublishRequest(publishData).then(() => {
 				createPublishRequest(publishData).then((publishRecord) => {
 	                        console.log('want to publish game but just going to put an sqs message');
+					console.log(publishData);
+					console.log('record');
+					console.log(publishRecord);
 				const messageBody = JSON.stringify(publishRecord);
 //
 				const sqsParams = {
@@ -1825,7 +1866,9 @@ const server = http.createServer((req, res) => {
 					console.log(sqsResponse);
 					res.end('created publish request');
 				});
-				}).catch(() => {
+				}).catch((err) => {
+					console.error('sqs error');
+					console.error(err);
 					res.writeHead(500);
 					res.end('Failed to create publish request');
 				})
@@ -1834,7 +1877,11 @@ const server = http.createServer((req, res) => {
 				res.end('Publish request already exists');
 			});
                     });
-                });
+                }).catch((err) => {
+			console.log('failed to verify access token');
+			console.log(err);
+			res.end('failed to verify access token');
+		});
             }
         } else if (req.url === '/asset') {
             const username = req.headers['hg-username'];
