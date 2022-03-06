@@ -991,16 +991,17 @@ const mapGame = (game) => {
         createdAt: game.created_on && game.created_on.N ? game.created_on.N : game.created_on,
         id: game.game_id && game.game_id.S ? game.game_id.S : game.game_id,
         thumbnail: game.thumbnail && game.thumbnail.S ? game.thumbnail.S : game.thumbnail,
-        name: game.name && game.name.S ? game.name.S : game.name
+        name: game.name && game.name.S ? game.name.S : game.name,
+	description: game.description && game.description.S ? game.description.S : game.description
     }
 };
 
 let gamesCache = {};
 
 const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = null, tags = []) => new Promise((resolve, reject) => {
-	if (gamesCache.timestamp && gamesCache.timestamp > Date.now() - (1 * 1000 * 60)) { //5 mins
+	if (gamesCache.timestamp && gamesCache.timestamp > Date.now() - (1 * 1000 * 60)) { //1 min
 		console.log('returning from cache');
-		resolve(gamesCache.games);
+		resolve(gamesCache.pages);
 	} else {
 		console.log('fetching from dynamo');
     		const client = new aws.DynamoDB.DocumentClient({
@@ -1009,24 +1010,49 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
 
     		const queryParams = {
     		    TableName: 'games',
+		    Limit: 6,
+	            IndexName: 'name_index',
+	            KeyConditionExpression: '#published_state = :public',
+	            ExpressionAttributeNames: {
+	                '#published_state': 'published_state',
+	            },
+	            ExpressionAttributeValues: {
+	                ':public': 'public'
+	            }
     		};
 
-    		client.scan(queryParams, (err, data) => {
-    		    console.log("got data");
-    		    console.log(data);
-    		    console.log(err);
-    		        if (err) {
-    		    	reject();
-    		        } else {
-            		const gameList = data.Items.map(mapGame);
-			gamesCache = {
-				games: gameList,
-				timestamp: Date.now()
-			};
-    		    	resolve(gameList);
-    		        }
-    		     
-    		});
+		// get data from dynamo in pages of 1MB by default or Limit if present
+		// dumb and expensive because we can support more than Limit, but 1MB is a lot and is weird to get in one big blob, so paginate mostly for user experience
+		// should use ES cache if we get a lot of traffic
+		const pages = {};
+		let pageCount = 1;
+
+		const makeQueries = (lastResult) => new Promise((resolve, reject) => {
+
+	    		client.query(queryParams, (err, data) => {
+	    		    console.log("got data");
+	    		    console.log(data);
+	    		    console.log(err);
+	    		    if (err) {
+	    		    	reject();
+	    		        } else {
+					if (data.Items.length) {
+						pages[pageCount++] = data.Items.map(mapGame);
+					}
+					if (data.LastEvaluatedKey) {
+						queryParams.ExclusiveStartKey = data.LastEvaluatedKey;
+						makeQueries(queryParams).then(resolve);
+					} else {
+						gamesCache = {pages, timestamp: Date.now()};
+						resolve(pages);
+					}
+	    		        }
+	    		     
+	    		});
+	
+		});
+
+		makeQueries().then(resolve);
 	}
     // const _data = {
     //     from: offset,
@@ -1498,12 +1524,15 @@ const server = http.createServer((req, res) => {
                     })); 
                 });
             } else {
-		    listGames().then(games => {
+		    listGames().then(pages=> {
                         res.writeHead(200, {
                              'Content-Type': 'application/json'
                          });
+			    console.log('got pages');
+			    console.log(pages);
                          res.end(JSON.stringify({
-                             games
+				 games: pages[page || 1],
+				 pageCount: Object.keys(pages).length
                          })); 
 		    });
             }
