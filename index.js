@@ -29,6 +29,31 @@ const SourceType = {
 
 const config = require('./config');
 
+const poolData = {
+};
+
+const getCognitoUser = (username) => new Promise((resolve, reject) => {
+    const params = {
+        UserPoolId: poolData.UserPoolId,
+        Username: username
+    };
+
+    const provider = new aws.CognitoIdentityServiceProvider({region: 'us-west-2'});
+
+    provider.adminGetUser(params, (err, data) => {
+	if (err) {
+		console.error(err);
+		reject('failed to get user');
+	} else {
+        	const isAdminAttribute = data.UserAttributes && data.UserAttributes.filter(a => a.Name === 'custom:isAdmin').length > 0 ? data.UserAttributes.filter(a => a.Name === 'custom:isAdmin')[0] : null;
+        	resolve({
+        	    created: data.UserCreateDate,
+        	    isAdmin: isAdminAttribute && isAdminAttribute.Value === 'true' ? true : false
+        	});
+	}
+    });
+});
+
 const uploadThumbnail = (username, gameId, thumbnail) => new Promise((resolve, reject) => {
 	console.log('need to upload to s3');
 	console.log(thumbnail);
@@ -869,6 +894,32 @@ const getPublishRequestEvents = (requestId) => new Promise((resolve, reject) => 
 
 });
 
+const adminListPublishRequests = () => new Promise((resolve, reject) => {
+            const client = new aws.DynamoDB.DocumentClient({
+                region: 'us-west-2'
+            });
+
+            const params = {
+                TableName: 'publish_requests',
+        	IndexName: 'status-index',
+                KeyConditionExpression: '#status = :status',
+                ExpressionAttributeNames: {
+                    '#status': 'status'
+                },
+                ExpressionAttributeValues: {
+                    ':status': 'APPROVED' 
+                }
+            };
+
+            client.query(params, (err, data) => {
+		    console.log("PUBLISH QUERY DATA");
+		    console.log(data);
+		    console.log(err);
+		    resolve({requests: data.Items});
+            });
+
+});
+
 const listPublishRequests = (gameId) => new Promise((resolve, reject) => {
             const client = new aws.DynamoDB.DocumentClient({
                 region: 'us-west-2'
@@ -1250,6 +1301,69 @@ const getGameInstance = (owner, repo, commit) => new Promise((resolve, reject) =
 
 });
 
+const adminPublishRequestAction = (requestId, action, message) => new Promise((resolve, reject) => {
+	const ddb = new aws.DynamoDB({
+       		region: 'us-west-2'
+        });
+
+	if (!action || action !== 'reject' && action !== 'approve') {
+		reject('invalid action');
+	}
+
+	if (!message) {
+		if (action === 'reject') {
+			reject('rejection requires message');
+		}
+
+		message = 'No message available';
+	}
+	
+	const newStatus = action === 'approve' ? 'PUBLISHED' : 'REJECTED';
+
+	getPublishRequest(requestId).then(requestData => {
+		console.log('got request data, need to do sometyhing to it');
+		console.log(requestData);
+		const sourceInfoHash = requestData.source_info_hash;
+		const gameId = requestData.game_id;
+
+        	const updateParams = {
+        	    TableName: 'publish_requests',
+		    Key: {
+        	        'game_id': {
+        	            S: gameId
+        	        },
+			'source_info_hash': {
+			    S: sourceInfoHash
+			}
+        	    },
+        	    AttributeUpdates: {
+        	        'status': {
+        	            Action: 'PUT',
+        	            Value: {
+        	                S: newStatus
+        	            }
+        	        },
+			'adminMessage': {
+				Action: 'PUT',
+				Value: {
+					S: message
+				}
+			}
+        	    }
+        	};
+
+        	ddb.updateItem(updateParams, (err, putResult) => {
+			console.log(err);
+			if (err) {
+				reject();
+			} else {
+				resolve();
+			}
+		});
+	});
+
+});
+
 const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
@@ -1261,7 +1375,39 @@ const server = http.createServer((req, res) => {
         const gameDetailRegex = new RegExp('/games/(\\S*)');
         const gameVersionDetailRegex = new RegExp('/games/(\\S*)/version/(\\S*)');
 
-        if (req.url == '/assets') {
+	if (req.url === '/admin/publish_requests') {
+		console.log('yoooooo');
+                const username = req.headers['hg-username'];
+                const token = req.headers['hg-token'];
+
+                verifyAccessToken(username, token).then(() => {
+			console.log('verified access token');
+			getCognitoUser(username).then(userData => {
+				if (userData.isAdmin) {
+					console.log(userData);
+					adminListPublishRequests().then(publishRequests => {
+						console.log("PUBLISH REQUESTSTS");
+						console.log(publishRequests);
+						res.end(JSON.stringify(publishRequests));
+					}).catch(err => {
+						console.log('failed to list publish requests');
+						console.error(err);
+						res.end('failed to list requests');
+					});
+				} else {
+					console.log('user attempted to call admin API: ' + username);
+					res.end('user is not an admin');
+				}
+			}).catch(err => {
+				console.log(err);
+				res.end('failed to get user data');
+			});
+		}).catch(err => {
+			console.log('admin access token error');
+			console.log(err);
+			res.end('admin access token error');
+		});
+	} else if (req.url == '/assets') {
             const username = req.headers['hg-username'];
             const token = req.headers['hg-token'];
 
@@ -1635,7 +1781,45 @@ const server = http.createServer((req, res) => {
     } else if (req.method === 'POST') {
         const gamePublishRegex = new RegExp('/games/(\\S*)/publish');
         const gameUpdateRegex = new RegExp('/games/(\\S*)/update');
-        if (req.url.match(gameUpdateRegex)) {
+        const requestActionRegex = new RegExp('/admin/request/(\\S*)/action');
+	if (req.url.match(requestActionRegex)) {
+            const username = req.headers['hg-username'];
+            const token = req.headers['hg-token'];
+            verifyAccessToken(username, token).then(() => {
+	        console.log('verified access token');
+		getCognitoUser(username).then(userData => {
+                    const _requestActionRegex = new RegExp('/admin/request/(\\S*)/action');
+                    const requestId = _requestActionRegex.exec(req.url)[1];
+		    if (userData.isAdmin) {
+                    	getReqBody(req, (_data) => {
+			    const reqBody = JSON.parse(_data);
+				if (reqBody.action) {
+			    		console.log('need to perform action on request ' + requestId);
+						adminPublishRequestAction(requestId, reqBody.action, reqBody.message).then(() => {
+							res.end('approved!');
+						}).catch(err => {
+							console.log('error performing publish action');
+							console.log(err);
+							res.end('error performing publish request action');
+						});
+				} else {
+					res.end('request missing action');
+				}
+			});
+		    } else {
+			console.log('user ' + username + ' attempted to perform action on request');
+			res.end('not an admin');
+		    }
+		}).catch(err => {
+		    console.log('failed to get user data');
+	            console.log(err);
+		    res.end('could not get user data');
+		});
+	    }).catch(err => {
+		console.log('failed to verify access token');
+		res.end('failed to verify access token');
+	    });
+	} else if (req.url.match(gameUpdateRegex)) {
             const username = req.headers['hg-username'];
             const token = req.headers['hg-token'];
 
