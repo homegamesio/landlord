@@ -6,6 +6,7 @@ const archiver = require('archiver');
 const fs = require('fs');
 const aws = require('aws-sdk');
 const querystring = require('querystring');
+const process = require('process');
 const {
     v4: uuidv4
 } = require('uuid');
@@ -27,9 +28,11 @@ const SourceType = {
 	GITHUB: "GITHUB"
 };
 
-const config = require('./config');
+const QUEUE_URL = process.env.SQS_QUEUE_URL;
 
 const poolData = {
+    UserPoolId: process.env.COGNITO_USER_POOL_ID,
+    ClientId: process.env.COGNITO_CLIENT_ID
 };
 
 const getCognitoUser = (username) => new Promise((resolve, reject) => {
@@ -948,7 +951,7 @@ const listPublishRequests = (gameId) => new Promise((resolve, reject) => {
 const listGamesForAuthor = ({ author, page, limit }) => new Promise((resolve, reject) => {
 
     const client = new aws.DynamoDB.DocumentClient({
-        region: config.DYNAMO_REGION
+        region: process.env.DYNAMO_REGION
     });
 
     const params = {
@@ -975,7 +978,7 @@ const listGamesForAuthor = ({ author, page, limit }) => new Promise((resolve, re
 
 const getGameDetails = (gameId) => new Promise((resolve, reject) => { 
     const client = new aws.DynamoDB.DocumentClient({
-        region: config.DYNAMO_REGION
+        region: process.env.DYNAMO_REGION
     });
 
     const params = {
@@ -1019,7 +1022,7 @@ const mapGameVersion = (gameVersion) => {
 
 const queryGames = (query) => new Promise((resolve, reject) => {
     const client = new aws.DynamoDB.DocumentClient({
-        region: config.DYNAMO_REGION
+        region: process.env.DYNAMO_REGION
     });
 
     const params = {
@@ -1068,7 +1071,7 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
 	} else {
 		console.log('fetching from dynamo');
     		const client = new aws.DynamoDB.DocumentClient({
-    		    region: config.DYNAMO_REGION
+    		    region: process.env.DYNAMO_REGION
     		});
 
     		const queryParams = {
@@ -1374,7 +1377,6 @@ const server = http.createServer((req, res) => {
         const publishRequestEventsRegex = new RegExp('/publish_requests/(\\S*)/events');
         const gameDetailRegex = new RegExp('/games/(\\S*)');
         const gameVersionDetailRegex = new RegExp('/games/(\\S*)/version/(\\S*)');
-
 	if (req.url === '/admin/publish_requests') {
 		console.log('yoooooo');
                 const username = req.headers['hg-username'];
@@ -2164,7 +2166,7 @@ const server = http.createServer((req, res) => {
                                    	const nowString = '' + Date.now();
 	                                const params = {
 	                                    RequestItems: {
-	                                        [config.GAME_TABLE]: [{
+	                                        [process.env.GAME_TABLE]: [{
 	                                                PutRequest: {
 	                                                    Item: {
 	                                                        'game_id': {
@@ -2206,7 +2208,7 @@ const server = http.createServer((req, res) => {
 	                                        res.writeHead(200, {
 	                                            'Content-Type': 'application/json'
 	                                        });
-	                                        res.end(JSON.stringify(mapGame(params.RequestItems[config.GAME_TABLE][0].PutRequest.Item)));
+	                                        res.end(JSON.stringify(mapGame(params.RequestItems[process.env.GAME_TABLE][0].PutRequest.Item)));
 	                                    } else {
 	                                        console.log(err);
 	                                        res.end('error');
