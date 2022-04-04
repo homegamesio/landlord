@@ -16,6 +16,51 @@ const getHash = (input) => {
 
 console.log('up');
 
+const createRecord = (developerId, assetId, size, name, metadata) => new Promise((resolve, reject) => {
+    const client = new aws.DynamoDB({
+        region: 'us-west-2'
+    });
+    console.log('creating with');
+    console.log(developerId);
+    const params = {
+        TableName: 'homegames_assets',
+        Item: {
+            'developer_id': {
+                S: developerId
+            },
+            'asset_id': {
+                S: assetId
+            },
+            'created_at': {
+                N: '' + Date.now()
+            },
+            'metadata': {
+                S: JSON.stringify(metadata)
+            },
+            'status': {
+                S: 'created'
+            },
+            'size': {
+                N: '' + size
+            },
+            'name': {
+                S: name
+            }
+        }
+    };
+
+    client.putItem(params, (err, putResult) => {
+        if (!err) {
+            resolve();
+        } else {
+            reject(err);
+        }
+    });
+
+});
+
+
+
 const upload = (filePath, assetId, fileName, fileSize, fileType) => new Promise((resolve, reject) => {
     console.log('need to upload with ' + assetId);
     const s3 = new aws.S3({region: 'us-west-2'});
@@ -94,6 +139,9 @@ const updateRecord = (developerId, assetId, _status) => new Promise((resolve, re
                 }
             });
         }
+	   else {
+		createRecord(_developerId, _assetId, _fileSize, _fileName, {}).then(resolve);
+	   }
     });
 });
 
