@@ -612,7 +612,6 @@ const updateGame = (developerId, gameId, gameName, description, newVersion) => n
 });
 
 const listAssets = (developerId) => new Promise((resolve, reject) => {
-    console.log('dddd ' + developerId);
     const client = new aws.DynamoDB({
         region: 'us-west-2'
     });
@@ -633,8 +632,6 @@ const listAssets = (developerId) => new Promise((resolve, reject) => {
 
     client.query(params, (err, results) => {
         if (!err) {
-            console.log('got assets');
-            console.log(results);
             const res = results.Items.map(i => {
                 return {
                     'developerId': i.developer_id.S,
@@ -1162,18 +1159,13 @@ const server = http.createServer((req, res) => {
         const gameDetailRegex = new RegExp('/games/(\\S*)');
         const gameVersionDetailRegex = new RegExp('/games/(\\S*)/version/(\\S*)');
         if (req.url === '/admin/publish_requests') {
-            console.log('yoooooo');
             const username = req.headers['hg-username'];
             const token = req.headers['hg-token'];
 
             verifyAccessToken(username, token).then(() => {
-                console.log('verified access token');
                 getCognitoUser(username).then(userData => {
                     if (userData.isAdmin) {
-                        console.log(userData);
                         adminListPublishRequests().then(publishRequests => {
-                            console.log('PUBLISH REQUESTSTS');
-                            console.log(publishRequests);
                             res.end(JSON.stringify(publishRequests));
                         }).catch(err => {
                             console.log('failed to list publish requests');
@@ -1621,9 +1613,6 @@ const server = http.createServer((req, res) => {
                             gameId
                         };
 
-                        console.log('publishing with payload');
-                        console.log(publishData);
-
                         const buildSourceInfoHash = ({sourceType, commit, owner, repo}) => {
                             const stringConcat = `${sourceType}${commit}${owner}${repo}`;
                             console.log('hashing string: ' + stringConcat);
@@ -1786,8 +1775,6 @@ const server = http.createServer((req, res) => {
                                     const assetId = getHash(uuidv4());
 
                                     const username = req.headers['hg-username'];
-                                    console.log('hello');
-                                    console.log(username);
                                     // todo: auth
                                     createRecord(username, assetId, f.size, f.originalFilename, {
                                         'Content-Type': f.headers['content-type']
