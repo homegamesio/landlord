@@ -1305,7 +1305,7 @@ const server = http.createServer((req, res) => {
                 }
             },
             [gameVersionDetailRegex]: {
-                handle: (userId, gameId, versionId) => {
+                handle: (gameId, versionId) => {
                     getGameDetails(gameId).then(data => {
                         const foundVersion = data.versions.find(v => v.versionId === versionId);
                         if (!foundVersion) {
