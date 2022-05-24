@@ -419,7 +419,7 @@ const getGame = (gameId) => new Promise((resolve, reject) => {
     });
 
     const params = {
-        TableName: 'games',
+        TableName: process.env.GAME_TABLE,
         Key: {
             'game_id': {
                 S: gameId 
@@ -672,7 +672,7 @@ const listGamesForAuthor = ({ author, page, limit }) => new Promise((resolve, re
     });
 
     const params = {
-        TableName: 'games',
+        TableName: process.env.GAME_TABLE,
         IndexName: 'created_by_index',
         KeyConditionExpression: '#created_by = :created_by',
         ExpressionAttributeNames: {
@@ -694,31 +694,35 @@ const listGamesForAuthor = ({ author, page, limit }) => new Promise((resolve, re
 });
 
 const getGameDetails = (gameId) => new Promise((resolve, reject) => { 
-    const client = new aws.DynamoDB.DocumentClient({
-        region: process.env.DYNAMO_REGION
-    });
 
-    const params = {
-        TableName: 'game_versions',
-        // IndexName: 'name_index',
-        KeyConditionExpression: '#game_id = :game_id',
-        ExpressionAttributeNames: {
-            '#game_id': 'game_id'
-        },
-        ExpressionAttributeValues: {
-            ':game_id': gameId
-        }
-    };
+    getGame(gameId).then(gameDetails => {
+    	const client = new aws.DynamoDB.DocumentClient({
+    	    region: process.env.DYNAMO_REGION
+    	});
 
-    client.query(params, (err, data) => {
-        if (err) {
-            console.log(err);
-            reject(err);
-        } else {
-            resolve({
-                versions: data.Items.map(mapGameVersion)
-            });
-        }
+    	const params = {
+    	    TableName: 'game_versions',
+    	    // IndexName: 'name_index',
+    	    KeyConditionExpression: '#game_id = :game_id',
+    	    ExpressionAttributeNames: {
+    	        '#game_id': 'game_id'
+    	    },
+    	    ExpressionAttributeValues: {
+    	        ':game_id': gameId
+    	    }
+    	};
+
+    	client.query(params, (err, data) => {
+    	    if (err) {
+    	        console.log(err);
+    	        reject(err);
+    	    } else {
+    	        resolve({
+		    ...gameDetails,
+    	            versions: data.Items.map(mapGameVersion)
+    	        });
+    	    }
+    	});
     });
 });
 
@@ -743,14 +747,14 @@ const queryGames = (query) => new Promise((resolve, reject) => {
     const params = {
         TableName: process.env.GAME_TABLE,
         IndexName: 'name_index',
-        KeyConditionExpression: '#published_state = :public and begins_with(#name, :name)',
+        KeyConditionExpression: '#published_state = :approved and begins_with(#name, :name)',
         ExpressionAttributeNames: {
             '#published_state': 'published_state',
             '#name': 'name'
         },
         ExpressionAttributeValues: {
             ':name': query,
-            ':public': 'public'
+            ':approved': 'APPROVED'
         }
     };
 
@@ -787,7 +791,7 @@ const listGames = (limit = 10, offset = 0, sort = DEFAULT_GAME_ORDER, query = nu
         });
 
         const queryParams = {
-            TableName: 'games',
+            TableName: process.env.GAME_TABLE,
             Limit: 6,
             IndexName: 'name_index',
             KeyConditionExpression: '#published_state = :approved',
@@ -1270,6 +1274,7 @@ const server = http.createServer((req, res) => {
                             res.end('error');
                         });
                     } else if (query) {
+			console.log('query is ' + query);
                         queryGames(query).then(data => {
                             res.writeHead(200, {
                                 'Content-Type': 'application/json'
@@ -1397,8 +1402,6 @@ const server = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') {
         res.end('ok');
     } else if (!requestHandlers[req.method]) {
-        console.log('wahhha');
-        console.log(req.method);
         res.writeHead(400);
         res.end('Unsupported method: ' + req.method);
     } else {
