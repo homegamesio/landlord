@@ -106,6 +106,8 @@ const getLatestGameVersion = (gameId) => new Promise((resolve, reject) => {
  
 });
 
+
+// unlisted
 const publishGameVersion = (publishRequest) => new Promise((resolve, reject) => {
     const gameId = publishRequest.game_id;
     const requestId = publishRequest.request_id;
@@ -376,11 +378,7 @@ const verifyPublishRequest = (code, requestId) => new Promise((resolve, reject) 
                 if (requestData.status == 'CONFIRMED') {
                     reject('already confirmed');
                 } else {
-                    emitEvent(requestId, 'VERIFICATION_SUCCESS').then(() => {
-                        updatePublishRequestState(game_id, source_info_hash, 'CONFIRMED').then(() => {
-                            resolve(requestData);
-                        });
-                    });
+                    resolve(requestData); 
                 }
             });
         }).catch(err => {
@@ -627,7 +625,7 @@ const adminListPublishRequests = () => new Promise((resolve, reject) => {
             '#status': 'status'
         },
         ExpressionAttributeValues: {
-            ':status': 'CONFIRMED' 
+            ':status': 'PENDING_PUBLISH_APPROVAL' 
         }
     };
 
@@ -908,6 +906,8 @@ const assetsListRegex = '/assets';
 const verifyPublishRequestRegex = '/verify_publish_request';
 const listGamesRegex = '/games';
 
+// terrible names
+const submitPublishRequestRegex = '/public_publish';
 const gamePublishRegex = '/games/(\\S*)/publish';
 const gameUpdateRegex = '/games/(\\S*)/update';
 const requestActionRegex = '/admin/request/(\\S*)/action';
@@ -960,7 +960,7 @@ const server = http.createServer((req, res) => {
                                                             S: fields.description[0] 
                                                         },
                                                         'thumbnail': {
-                                                            S: url
+								S: url.replace('https://assets.homegames.io/', '') 
                                                         }
                                                     }
                                                 }
@@ -1221,6 +1221,25 @@ const server = http.createServer((req, res) => {
                     });
                 }
             },
+            [submitPublishRequestRegex]: {
+                requiresAuth: true,
+                handle: (userId) => {
+                    getReqBody(req, (_data) => {
+                        const data = JSON.parse(_data);
+
+			const { requestId } = data;
+			getPublishRequest(requestId).then(requestData => {
+                        	updatePublishRequestState(requestData.game_id, requestData.source_info_hash, 'PENDING_PUBLISH_APPROVAL').then(() => {
+                                        res.end('ok');
+                                }).catch(err => {
+					res.end(err.toString());
+				});
+                            }).catch(err => {
+                                res.end(err.toString());
+                            });
+                    });
+                }
+            },
             [requestActionRegex]: {
                 requiresAuth: true,
                 handle: (userId, requestId) => {
@@ -1259,6 +1278,8 @@ const server = http.createServer((req, res) => {
             [listGamesRegex]: {
                 handle: () => {
                     const queryObject = url.parse(req.url, true).query;
+		    console.log('wahhahaha');
+			console.log(queryObject);
                     const { query, author, page, limit } = queryObject;
                     if (author) {
                         listGamesForAuthor({ author, page, limit }).then((data) => {
@@ -1338,8 +1359,13 @@ const server = http.createServer((req, res) => {
                     const queryObject = url.parse(req.url, true).query;
                     const { code, requestId } = queryObject;
                     verifyPublishRequest(code, requestId).then((publishRequest) => {
-                        publishGameVersion(publishRequest);
-                        res.end('verified!');
+                        publishGameVersion(publishRequest).then(() => {
+				emitEvent(requestId, 'VERIFICATION_SUCCESS').then(() => {
+                        		updatePublishRequestState(publishRequest.game_id, publishRequest.source_info_hash, 'CONFIRMED').then(() => {
+                        			res.end('verified!');
+					});
+                    		});
+			});
                     }).catch(err => {
                         res.end(err);
                     });
