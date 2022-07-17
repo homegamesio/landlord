@@ -896,6 +896,101 @@ const adminPublishRequestAction = (requestId, action, message) => new Promise((r
 
 });
 
+let s3Cache;
+
+const transformS3Response = (s3Content) => {
+    const episodeEntryRegex = new RegExp('episode_(\\d+)\.mp3|\.mp4$');
+    const transformed = {};
+    s3Content.filter(e => episodeEntryRegex.exec(e.Key)).forEach(e => {
+        const baseKey = e.Key.substring(0, e.Key.length - 4);
+        const ret = {
+            key: baseKey
+        };
+
+        if (!transformed[baseKey]) {
+            transformed[baseKey] = {
+                episode: Number(episodeEntryRegex.exec(e.Key)[1])
+            };
+        }
+
+        if (e.Key.endsWith('.mp3')) {
+            transformed[baseKey].audio = `https://podcast.homegames.io/${e.Key}`
+        } else if (e.Key.endsWith('.mp4')) {
+            transformed[baseKey].video = `https://podcast.homegames.io/${e.Key}`
+        }
+    });
+
+    const sortedKeys = Object.keys(transformed).sort((a, b) => {
+        return transformed[a].episode - transformed[b].episode;
+    });
+
+    const retList = sortedKeys.map(k => {
+        return transformed[k];
+    });
+
+    return retList;
+};
+
+const fillS3Cache = () => new Promise((resolve, reject) => {
+    const s3 = new aws.S3();
+
+    const getNext = (continuationToken) => new Promise((resolve, reject) => {
+        const s3Params = {
+            Bucket: 'podcast.homegames.io'
+        };
+
+        if (continuationToken) {
+            s3Params['ContinuationToken'] = continuationToken;
+        }
+
+        s3.listObjects(s3Params, (err, data) => {
+            resolve(data);
+        });
+    });
+
+    let allData = [];
+    const waitUntilDone = (continuationToken) => new Promise((resolve, reject) => {
+        getNext(continuationToken).then((data) => {
+            allData = allData.concat(data.Contents);
+            if (data.continuationToken) {
+                waitUntilDone(data.continuationToken).then(resolve);
+            } else {
+                resolve();
+            }
+        }).catch(err => {
+            console.error(err);
+            reject(err);
+        });
+    });
+
+    waitUntilDone().then(() => {
+        const transformedData = transformS3Response(allData);
+        s3Cache = {
+            timestamp: Date.now(),
+            data: transformedData
+        };
+
+        resolve(s3Cache);
+    }).catch(err => {
+        reject(err);
+    });
+        
+});
+
+const getPodcastData = (offset = 0, limit = 20) => new Promise((resolve, reject) => {
+    if (s3Cache && (s3Cache.timestamp > Date.now() - (1000 * 60 * 5))) {
+        const startIndex = offset > 0 ? Math.min(s3Cache.data.length, Number(offset)) : 0;
+        const endIndex = Math.min(startIndex + limit, s3Cache.data.length);
+        resolve(s3Cache.data.slice(startIndex, endIndex));
+    } else {
+        fillS3Cache().then(() => {
+            const startIndex = offset > 0 ? Math.min(s3Cache.data.length, Number(offset)) : 0;
+            const endIndex = Math.min(startIndex + limit, s3Cache.data.length);
+            resolve(s3Cache.data.slice(startIndex, endIndex));
+        });
+    }
+});
+
 const publishRequestsRegex = '/games/(\\S*)/publish_requests';
 const publishRequestEventsRegex = '/publish_requests/(\\S*)/events';
 const gameDetailRegex = '/games/(\\S*)';
@@ -905,6 +1000,7 @@ const adminListPublishRequestsRegex = '/admin/publish_requests';
 const assetsListRegex = '/assets';
 const verifyPublishRequestRegex = '/verify_publish_request';
 const listGamesRegex = '/games';
+const podcastRegex = '/podcast';
 
 // terrible names
 const submitPublishRequestRegex = '/public_publish';
@@ -1275,11 +1371,18 @@ const server = http.createServer((req, res) => {
             }
         },
         'GET': {
+            [podcastRegex]: {
+                handle: () => {
+                    const queryObject = url.parse(req.url, true).query;
+                    const { limit, offset } = queryObject;
+                    getPodcastData(Number(offset), Number(limit)).then(podcastData => {
+                        res.end(JSON.stringify(podcastData));
+                    });
+                }
+            },
             [listGamesRegex]: {
                 handle: () => {
                     const queryObject = url.parse(req.url, true).query;
-		    console.log('wahhahaha');
-			console.log(queryObject);
                     const { query, author, page, limit } = queryObject;
                     if (author) {
                         listGamesForAuthor({ author, page, limit }).then((data) => {
