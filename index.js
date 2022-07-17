@@ -977,16 +977,25 @@ const fillS3Cache = () => new Promise((resolve, reject) => {
         
 });
 
-const getPodcastData = (offset = 0, limit = 20) => new Promise((resolve, reject) => {
+const getPodcastData = (offset = 0, limit = 20, sort = 'desc') => new Promise((resolve, reject) => {
     if (s3Cache && (s3Cache.timestamp > Date.now() - (1000 * 60 * 5))) {
         const startIndex = offset > 0 ? Math.min(s3Cache.data.length, Number(offset)) : 0;
         const endIndex = Math.min(startIndex + limit, s3Cache.data.length);
-        resolve(s3Cache.data.slice(startIndex, endIndex));
+        const retList = [...s3Cache.data];
+        if (sort === 'desc') {
+            retList.reverse();
+        }
+        resolve(retList.slice(startIndex, endIndex));
     } else {
         fillS3Cache().then(() => {
             const startIndex = offset > 0 ? Math.min(s3Cache.data.length, Number(offset)) : 0;
             const endIndex = Math.min(startIndex + limit, s3Cache.data.length);
-            resolve(s3Cache.data.slice(startIndex, endIndex));
+
+            const retList = [...s3Cache.data];
+            if (sort === 'desc') {
+                retList.reverse();
+            }
+            resolve(retList.slice(startIndex, endIndex));
         });
     }
 });
@@ -1374,8 +1383,8 @@ const server = http.createServer((req, res) => {
             [podcastRegex]: {
                 handle: () => {
                     const queryObject = url.parse(req.url, true).query;
-                    const { limit, offset } = queryObject;
-                    getPodcastData(Number(offset || 0), Number(limit || 20)).then(podcastData => {
+                    const { limit, offset, sort } = queryObject;
+                    getPodcastData(Number(offset || 0), Number(limit || 20), sort || 'desc').then(podcastData => {
                         res.end(JSON.stringify(podcastData));
                     });
                 }
