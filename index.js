@@ -1375,7 +1375,7 @@ const server = http.createServer((req, res) => {
                 handle: () => {
                     const queryObject = url.parse(req.url, true).query;
                     const { limit, offset } = queryObject;
-                    getPodcastData(Number(offset), Number(limit)).then(podcastData => {
+                    getPodcastData(Number(offset || 0), Number(limit || 20)).then(podcastData => {
                         res.end(JSON.stringify(podcastData));
                     });
                 }
